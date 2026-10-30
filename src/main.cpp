@@ -25,13 +25,15 @@ int main() {
 
     uav::World world;
     auto plane = std::make_unique<uav::FixedWing>(generate_sport_drone());
+    //
+    // auto plane = std::make_unique<uav::FixedWing>(generate_zagi_flying_wing());
     uav::FixedWing &body = *plane;
     world.bodies.bodies.push_back(std::move(plane));
 
     // level flight trim at 20 m/s, found numerically by solving fx = fz = m = 0 with theta = alpha
     // (for the zagi it was Va 18, alpha 0.071940, trim {-0.197314, 0, 0, 0.783290})
-    const double Va_trim = 20.0, alpha_trim = 0.011556;
-    body.trim = {-0.008667, 0.0, 0.0, 0.633204};
+    const double Va_trim = 18, alpha_trim = 0.071940;
+    body.trim = {-0.197314, 0, 0, 0.783290};
 
     // starts 20 m up, flying north in trimmed level flight
     auto start = [&body, Va_trim, alpha_trim]() {
@@ -42,6 +44,7 @@ int main() {
             Vector3d(Va_trim * std::cos(alpha_trim), 0.0, Va_trim * std::sin(alpha_trim));
         body.controls = body.trim;
     };
+
     start();
 
     while (!WindowShouldClose()) {
