@@ -26,6 +26,9 @@ add_library(uav_core STATIC
   src/body.cpp
   src/body_system.cpp
   src/air_system.cpp
+  src/sensors.cpp
+  src/control.cpp
+  src/autopilot.cpp
   src/world.cpp
 )
 target_include_directories(uav_core PUBLIC include)

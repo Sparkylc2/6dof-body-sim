@@ -10,7 +10,10 @@ struct World {
     BodySystem bodies;    // dynamics model for the bodies
     double t = 0.0;
 
-    // steps the atmosphere and the bodies
+    // separate from the atmosphere's so changing the sensors doesn't change the turbulence
+    std::mt19937 sensor_rng{1};
+
+    // steps the atmosphere and the bodies, then samples each body's sensors
     void step(double dt);
 };
 } // namespace uav

@@ -8,7 +8,7 @@ namespace uav {
 Wrench gravity(double m, const Vector4d &e) {
     Wrench w;
 
-    Eigen::Vector3d g = {0, 0, m * 9.81};
+    Eigen::Vector3d g = {0, 0, m * GRAVITY};
     // gravity is along +d in NED, rotation(e) is body -> vehicle so you need to transpose
     Eigen::Matrix3d R_grav = rotation(e).transpose();
 

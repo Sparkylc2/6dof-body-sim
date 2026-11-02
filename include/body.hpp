@@ -6,6 +6,7 @@
 #include "body_state.hpp"
 #include "force_models.hpp"
 #include "force_models/fixed_wing_model.hpp"
+#include "sensors.hpp"
 
 namespace uav {
 using Eigen::Ref;
@@ -27,7 +28,9 @@ struct Body {
     std::unique_ptr<Gust> gust = std::make_unique<DrydenGust>();
     AirState air; // the air around the body this step, it's set by the World before the bodies step
 
-    // this will be overwritten by subclasses to implement different craft and their specific forces
+    Sensors sensors; // onboard sensors readings, gets sampled by the World after the bodies step
+
+    // this gets overwritten by subclasses to implement different craft and their specific forces
     virtual Wrench wrench(const BodyState &x, const AirState &air) const = 0;
 
     // the gust pointer makes bodies move only, and declaring the destructor would otherwise stop

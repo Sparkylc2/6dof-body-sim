@@ -1,7 +1,10 @@
+#include "autopilot.hpp"
 #include "body.hpp"
 #include "body_system.hpp"
+#include "control.hpp"
 #include "force_models/fixed_wing_model.hpp"
 #include "frames.hpp"
+#include "sensors.hpp"
 #include "world.hpp"
 #include <cmath>
 #include <cstdio>
@@ -12,7 +15,6 @@
 
 // moving forward i'm having claude generate the tests, in the interest of time
 // however, i do go through the tests, and some of them are my own suggestions
-
 static int g_checks = 0;
 static int g_failures = 0;
 
@@ -556,6 +558,373 @@ static void test_world_turbulent_flight() {
     CHECK(b.air.gust_b.norm() > 0.0);
 }
 
+// ---- sensors ----
+// all the noise and biases off so the readings should be exactly the truth
+static uav::SensorParams ideal_sensors() {
+    uav::SensorParams p;
+    p.sigma_gyro = p.sigma_accel = p.sigma_abs_pres = p.sigma_diff_pres = p.sigma_mag = 0.0;
+    p.beta_abs_pres = p.beta_diff_pres = p.beta_mag = 0.0;
+    p.sigma_gps = Eigen::Vector3d::Zero();
+    p.sigma_gps_V = 0.0;
+    return p;
+}
+
+// mean and std of a stream of samples
+struct Stats {
+    double sum = 0.0, sum_sq = 0.0;
+    int n = 0;
+    void add(double x) {
+        sum += x;
+        sum_sq += x * x;
+        ++n;
+    }
+    double mean() const { return sum / n; }
+    double std() const { return std::sqrt(sum_sq / n - mean() * mean()); }
+};
+
+// 7.3 (forces) needs to give the same specific force as 7.1 (state derivatives)
+// this js uses a zagi with some bank, pitch, and rotation with some sideslip
+static void test_specific_force_matches_state_derivatives() {
+    uav::FixedWing zagi = uav::generate_zagi_flying_wing();
+    zagi.state.quat() = uav::euler_to_quat(0.4, 0.15, -0.7);
+    zagi.state.vel() = Eigen::Vector3d(17.0, 1.5, 1.2);
+    zagi.state.rates() = Eigen::Vector3d(0.3, -0.2, 0.15);
+    zagi.controls = {-0.1, 0.05, 0.0, 0.8};
+
+    const uav::BodyState &x = zagi.state;
+    const uav::Wrench w = zagi.wrench(x, {});
+    uav::BodySystem sys;
+    const uav::StateVector x_dot = sys.derivatives(zagi, x, w.F, w.M);
+
+    const double u = x.vel().x(), v = x.vel().y(), wv = x.vel().z();
+    const double p = x.rates().x(), q = x.rates().y(), r = x.rates().z();
+    const Eigen::Vector3d euler = uav::quat_to_euler(x.quat());
+    const double phi = euler.x(), theta = euler.y(), g = uav::GRAVITY;
+
+    // eqn 7.1 without the noise
+    const Eigen::Vector3d a(
+        x_dot(uav::VEL) + q * wv - r * v + g * std::sin(theta),
+        x_dot(uav::VEL + 1) + r * u - p * wv - g * std::cos(theta) * std::sin(phi),
+        x_dot(uav::VEL + 2) + p * v - q * u - g * std::cos(theta) * std::cos(phi));
+
+    CHECK_VEC_NEAR(uav::specific_force(w, zagi.m, x.quat()), a, 1e-10);
+}
+
+// in free fall the accelerometer shld read nothing, but if it's held up against gravity it should
+// read -g on the axis pointing down
+static void test_specific_force_free_fall_and_hover() {
+    uav::Drone d;
+    const Eigen::Vector4d level(1, 0, 0, 0);
+    CHECK_VEC_NEAR(uav::specific_force(uav::gravity(d.m, level), d.m, level),
+                   Eigen::Vector3d::Zero(), 1e-12);
+
+    // zero net force (eg sitting on a table) is the same reading for any attitude, -R^T [0 0 g]
+    const Eigen::Vector4d tilted = uav::euler_to_quat(0.3, -0.2, 1.0);
+    const Eigen::Vector3d expect = -uav::rotation(tilted).transpose() * Eigen::Vector3d(0, 0, 9.81);
+    CHECK_VEC_NEAR(uav::specific_force(uav::Wrench(), d.m, tilted), expect, 1e-12);
+    CHECK_VEC_NEAR(uav::specific_force(uav::Wrench(), d.m, level), Eigen::Vector3d(0, 0, -9.81),
+                   1e-12);
+}
+
+// simple calcs for what the pressure should be given airspeed, rho and alt
+static void test_pressure_models() {
+    CHECK_NEAR(uav::abs_pressure(1.2682, 100.0), 1.2682 * 9.81 * 100.0, 1e-9);
+    CHECK_NEAR(uav::abs_pressure(1.2682, 0.0), 0.0, 0.0);
+    CHECK_NEAR(uav::diff_pressure(1.2682, 20.0), 0.5 * 1.2682 * 400.0, 1e-9);
+}
+
+// rotating provo's magnetic field (7.4) into the body and tilt compensating it has to give back
+// psi - declination for any roll and pitch
+static void test_magnetic_heading_tilt_compensation() {
+    const Eigen::Vector3d m_i(21053.0, 4520.0, 47689.0); // nT, north east down
+    const double declination = std::atan2(m_i.y(), m_i.x());
+    CHECK_NEAR(declination, 12.12 * uav::DEG, 0.01 * uav::DEG);
+
+    std::mt19937 rng(3);
+    std::uniform_real_distribution<double> angle(-1.2, 1.2);
+    // check over a couple different tilt angles
+    for (int i = 0; i < 50; ++i) {
+        const double phi = angle(rng), theta = angle(rng), psi = 2.5 * angle(rng);
+        const Eigen::Vector3d m_b =
+            uav::rotation(uav::euler_to_quat(phi, theta, psi)).transpose() * m_i;
+        const double psi_m = uav::magnetic_heading(m_b, phi, theta);
+        CHECK_NEAR(uav::wrap_angle(psi_m + declination - psi), 0.0, 1e-12);
+    }
+}
+
+// the gauss-markov process should settle to sigma / sqrt(1 - e^(-2*k*Ts)), and with table 7.2 that
+// should be the 4.7 m and 9.2 m bias sizes from 7.5.2 (the book quotes 9.4 m for altitude)
+static void test_gauss_markov() {
+    CHECK_NEAR(uav::gauss_markov_std(1.0 / 1100.0, 1.0, 0.21), 4.7, 0.3);
+    CHECK_NEAR(uav::gauss_markov_std(1.0 / 1100.0, 1.0, 0.40), 9.4, 0.05);
+
+    // a shorter time constant  (rather than 1100s xD) so a long run covers lots of correlation
+    // times
+    const double k = 0.1, Ts = 1.0, sigma = 0.4;
+    std::mt19937 rng(5);
+    Stats s;
+    double nu = 0.0;
+    for (int i = 0; i < 200000; ++i) {
+        nu = uav::gauss_markov(nu, k, Ts, sigma, rng);
+        s.add(nu);
+    }
+    CHECK_NEAR(s.std() / uav::gauss_markov_std(k, Ts, sigma), 1.0, 0.03);
+    CHECK_NEAR(s.mean(), 0.0, 0.1);
+}
+
+static void test_ground_speed_course() {
+    const Eigen::Vector2d east = uav::ground_speed_course(Eigen::Vector3d(0, 15, -2));
+    CHECK_NEAR(east.x(), 15.0, 1e-12); // climbing doesn't count
+    CHECK_NEAR(east.y(), pi / 2, 1e-12);
+    const Eigen::Vector2d sw = uav::ground_speed_course(Eigen::Vector3d(-3, -4, 0));
+    CHECK_NEAR(sw.x(), 5.0, 1e-12);
+    CHECK_NEAR(sw.y(), std::atan2(-4.0, -3.0), 1e-12);
+}
+
+// a zagi with an empty sensor object in the world
+static uav::FixedWing &add_zagi(uav::World &world, const uav::SensorParams &params) {
+    auto zagi = std::make_unique<uav::FixedWing>(uav::generate_zagi_flying_wing());
+    zagi->state.pos() = Eigen::Vector3d(10, -5, -30);
+    zagi->state.quat() = uav::euler_to_quat(0.2, 0.05, pi / 2); // nose east
+    zagi->state.vel() = Eigen::Vector3d(15.0, 0.5, 1.0);
+    zagi->controls = {-0.1, 0.0, 0.0, 0.8};
+    zagi->sensors.params = params;
+    uav::FixedWing &b = *zagi;
+    world.bodies.bodies.push_back(std::move(zagi));
+    return b;
+}
+
+// with the noise off every reading should be the model applied to the true state
+static void test_ideal_sensors_read_truth() {
+    uav::World world;
+    world.atmosphere.turbulence = false;
+    world.atmosphere.wind_i = Eigen::Vector3d(-3, 2, 0);
+    uav::FixedWing &b = add_zagi(world, ideal_sensors());
+
+    world.step(0.01);
+
+    const uav::BodyState &x = b.state;
+    const uav::SensorReadings &y = b.sensors.y;
+    CHECK_VEC_NEAR(y.gyro, x.rates(), 1e-15);
+    CHECK_VEC_NEAR(y.accel, uav::specific_force(b.wrench(x, b.air), b.m, x.quat()), 1e-12);
+    CHECK_NEAR(y.abs_pres, b.air.rho * 9.81 * -x.pos().z(), 1e-9);
+    const double Va = uav::air_data(x.vel(), x.quat(), b.air).Va;
+    CHECK_NEAR(y.diff_pres, 0.5 * b.air.rho * Va * Va, 1e-9);
+    CHECK_NEAR(y.compass, uav::quat_to_euler(x.quat()).z(), 1e-12);
+    CHECK_VEC_NEAR(y.gps_pos, Eigen::Vector3d(x.pos().x(), x.pos().y(), -x.pos().z()), 1e-12);
+
+    const Eigen::Vector3d vel_i = uav::rotation(x.quat()) * x.vel();
+    CHECK_NEAR(y.gps_Vg, vel_i.head<2>().norm(), 1e-12);
+    CHECK_NEAR(y.gps_course, std::atan2(vel_i.y(), vel_i.x()), 1e-12);
+    CHECK(std::abs(y.gps_course - pi / 2) < 0.2); // heading east so roughly east
+
+    // the wind changes the airspeed (and so diff_pres) but not what gps sees, which is ground speed
+    CHECK(std::abs(Va - x.vel().norm()) > 1.0);
+}
+
+// each sensor group samples at its own rate
+// for analog 2s at 100Hz is 200 analog samples
+// the compass is at 8Hz, it samples on the first step then every 0.125s
+// the gps is at 1Hz, it samples on the first step then every 1s
+static void test_sensor_sample_rates() {
+    uav::World world;
+    world.atmosphere.turbulence = false;
+    uav::FixedWing &b = add_zagi(world, uav::SensorParams());
+
+    int n_analog = 0, n_compass = 0, n_gps = 0;
+    uav::SensorReadings last = b.sensors.y;
+    for (int i = 0; i < 200; ++i) {
+        world.step(0.01);
+        const uav::SensorReadings &y = b.sensors.y;
+        n_analog += y.t_analog != last.t_analog;
+        n_compass += y.t_compass != last.t_compass;
+        n_gps += y.t_gps != last.t_gps;
+
+        // an unsampled reading shouldn't change between samples
+        if (y.t_gps == last.t_gps)
+            CHECK(y.gps_pos == last.gps_pos);
+        last = y;
+    }
+    CHECK(n_analog == 200);
+    CHECK(n_compass == 17);
+    CHECK(n_gps == 3);
+}
+
+// a drone hovering still at 20 m
+// the readings should scatter around with truth + bias from the appendix H standard deviations
+static void test_sensor_noise_statistics() {
+    uav::World world;
+    world.atmosphere.turbulence = false;
+    auto drone = std::make_unique<uav::Drone>();
+    drone->state.pos() = Eigen::Vector3d(0, 0, -20);
+    drone->state.quat() = uav::euler_to_quat(0, 0, 0.5);
+    drone->input.F = Eigen::Vector3d(0, 0, -drone->m * 9.81); // holds it up still
+    uav::Drone &d = *drone;
+    world.bodies.bodies.push_back(std::move(drone));
+
+    const uav::SensorParams p;
+    Stats gyro, accel_z, abs_pres, diff_pres, compass;
+    double t_compass = -1.0;
+    for (int i = 0; i < 20000; ++i) {
+        world.step(0.01);
+        const uav::SensorReadings &y = d.sensors.y;
+        gyro.add(y.gyro.y());
+        accel_z.add(y.accel.z());
+        abs_pres.add(y.abs_pres);
+        diff_pres.add(y.diff_pres);
+        if (y.t_compass != t_compass) {
+            compass.add(y.compass);
+            t_compass = y.t_compass;
+        }
+    }
+
+    // makes sure it really did stay still
+    CHECK_VEC_NEAR(d.state.pos(), Eigen::Vector3d(0, 0, -20), 1e-9);
+
+    CHECK_NEAR(gyro.mean(), 0.0, 0.05 * p.sigma_gyro);
+    CHECK_NEAR(gyro.std() / p.sigma_gyro, 1.0, 0.05);
+    CHECK_NEAR(accel_z.mean(), -9.81, 0.05 * p.sigma_accel);
+    CHECK_NEAR(accel_z.std() / p.sigma_accel, 1.0, 0.05);
+    CHECK_NEAR(abs_pres.mean(), d.air.rho * 9.81 * 20.0 + p.beta_abs_pres, 0.05 * p.sigma_abs_pres);
+    CHECK_NEAR(abs_pres.std() / p.sigma_abs_pres, 1.0, 0.05);
+    CHECK_NEAR(diff_pres.mean(), p.beta_diff_pres, 0.05 * p.sigma_diff_pres); // still air, Va = 0
+    CHECK_NEAR(diff_pres.std() / p.sigma_diff_pres, 1.0, 0.05);
+    CHECK_NEAR(compass.mean(), 0.5 + p.beta_mag, 0.1 * p.sigma_mag);
+    CHECK_NEAR(compass.std() / p.sigma_mag, 1.0, 0.1);
+
+    // 200 s of gps is a fraction of the 1100 s time constant, so the error is mostly the bias it
+    // started with, so this js checks its a sensible size
+    CHECK((d.sensors.y.gps_pos - Eigen::Vector3d(0, 0, 20)).norm() < 50.0);
+}
+
+// ---- control ----
+static void test_saturate_and_rate_limit() {
+    CHECK_NEAR(uav::saturate(2.0, 0.0, 1.0), 1.0, 0.0);
+    CHECK_NEAR(uav::saturate(-0.5, 0.0, 1.0), 0.0, 0.0);
+    CHECK_NEAR(uav::saturate(0.3, 0.0, 1.0), 0.3, 0.0);
+
+    // 2 per second over 0.1 s can only move 0.2 either way
+    CHECK_NEAR(uav::rate_limit(1.0, 0.0, 2.0, 0.1), 0.2, 1e-15);
+    CHECK_NEAR(uav::rate_limit(-1.0, 0.0, 2.0, 0.1), -0.2, 1e-15);
+    CHECK_NEAR(uav::rate_limit(0.05, 0.0, 2.0, 0.1), 0.05, 1e-15);
+}
+
+// a 100 Hz clock should sample 100 times a second whether the sim steps at Ts or faster
+// (over [0, 1) since the first sample is at t = 0)
+static void test_sample_clock() {
+    for (const double dt : {0.01, 0.001, 0.004}) {
+        uav::SampleClock clock{0.01};
+        int n = 0;
+        const int steps = static_cast<int>(std::round(1.0 / dt));
+        for (int i = 0; i < steps; ++i)
+            n += clock.ready(i * dt);
+        CHECK(n == 100);
+    }
+}
+
+// the trapezoid rule is exact for a ramp, and the derivative should converge to the slope
+static void test_integrator_and_differentiator() {
+    const double dt = 0.01;
+    uav::Integrator integ;
+    uav::Differentiator diff;
+    for (int i = 0; i <= 100; ++i) {
+        integ.step(3.0 * i * dt, dt);
+        diff.step(3.0 * i * dt, dt);
+    }
+    CHECK_NEAR(integ.y, 1.5, 1e-12); // integral of 3t from 0 to 1
+    CHECK_NEAR(diff.y, 3.0, 1e-6);   // 1 s is 20 time constants of the filter
+
+    // an angle going round through +-pi at 1 rad/s should still differentiate to 1
+    uav::Differentiator ang;
+    ang.wrap = true;
+    for (int i = 0; i <= 200; ++i)
+        ang.step(uav::wrap_angle(2.5 + i * dt), dt);
+    CHECK_NEAR(ang.y, 1.0, 1e-6);
+}
+
+// a low pass with a step gets to 1 - 1/e after one time constant, and should be 1 at steady state
+static void test_low_pass() {
+    uav::LowPass lp;
+    lp.tau = 0.5;
+    const double dt = 0.001;
+    lp.step(0.0, dt); // primes at 0 so the step comes after
+    for (int i = 0; i < 500; ++i)
+        lp.step(1.0, dt);
+    CHECK_NEAR(lp.y, 1.0 - std::exp(-1.0), 1e-3);
+    for (int i = 0; i < 10000; ++i)
+        lp.step(1.0, dt);
+    CHECK_NEAR(lp.y, 1.0, 1e-9);
+}
+
+// commanding 179 deg while at -179 deg should be a 2 deg error not 358
+static void test_pid_wraps_angles() {
+    uav::PID pid;
+    pid.params = {.kp = 1.0, .wrap = true};
+    CHECK_NEAR(pid.update(179.0 * uav::DEG, -179.0 * uav::DEG, 0.01), -2.0 * uav::DEG, 1e-12);
+}
+
+// a big step into a saturated pi on an pure integrator, without anti-windup the integrator
+// should build up the entire time
+static double windup_overshoot(uav::AntiWindup aw) {
+    uav::PID pid;
+    pid.params = {.kp = 1.0, .ki = 1.0, .lo = -1.0, .hi = 1.0, .anti_windup = aw, .Tt = 0.2};
+    double x = 0.0, x_max = 0.0;
+    const double dt = 0.01;
+    // 120 s since without anti-windup it takes a long time to unwind and settle
+    for (int i = 0; i < 12000; ++i) {
+        x += dt * pid.update(10.0, x, dt);
+        x_max = std::max(x_max, x);
+    }
+    CHECK_NEAR(x, 10.0, 1e-3); // all of them get there eventually (we hope)
+    return x_max - 10.0;
+}
+
+static void test_pid_anti_windup() {
+    const double none = windup_overshoot(uav::AntiWindup::None);
+    const double clamp = windup_overshoot(uav::AntiWindup::Clamp);
+    CHECK(none > 5.0);
+    CHECK(clamp < 0.5);
+}
+
+// flying north at 15 m/s ground speed through a crosswind from the east, the nose points into the
+// wind but the course should still be north
+static void test_true_control_state() {
+    uav::BodyState x;
+    x.pos() = Eigen::Vector3d(5, -3, -40);
+    const double crab = std::atan2(4.0, 15.0); // nose turned east into the wind
+    x.quat() = uav::euler_to_quat(0, 0, crab);
+    x.vel() = uav::rotation(x.quat()).transpose() * Eigen::Vector3d(15, 0, 0);
+    uav::AirState air;
+    air.wind_i = Eigen::Vector3d(0, -4, 0); // blowing west
+
+    const uav::ControlState s = uav::true_control_state(x, air);
+    CHECK_NEAR(s.h, 40.0, 1e-12);
+    CHECK_NEAR(s.chi, 0.0, 1e-12);
+    CHECK_NEAR(s.Vg, 15.0, 1e-12);
+    CHECK_NEAR(s.psi, crab, 1e-12);
+    CHECK_NEAR(s.Va, std::sqrt(15.0 * 15.0 + 16.0), 1e-12);
+}
+
+// the autopilot runs on its clock and holds control outputs in between
+struct CountingAutopilot : uav::Autopilot {
+    int n = 0;
+    uav::FixedWingControls update(const uav::AutopilotCommands &,
+                                  const uav::ControlState &) override {
+        ++n;
+        return {.dt = 0.01 * n};
+    }
+    void reset() override { n = 0; }
+};
+
+static void test_autopilot_holds_between_samples() {
+    CountingAutopilot ap;
+    ap.clock.Ts = 0.05;
+    for (int i = 0; i < 100; ++i)
+        ap.step(i * 0.01, {}, {});
+    CHECK(ap.n == 20);
+    CHECK_NEAR(ap.controls.dt, 0.2, 1e-12);
+}
+
 int main() {
     test_rotation_is_orthonormal();
     test_rotation_sign_conventions();
@@ -586,6 +955,23 @@ int main() {
     test_dryden_gust_rms();
     test_world_calm_matches_body_system();
     test_world_turbulent_flight();
+    test_specific_force_matches_state_derivatives();
+    test_specific_force_free_fall_and_hover();
+    test_pressure_models();
+    test_magnetic_heading_tilt_compensation();
+    test_gauss_markov();
+    test_ground_speed_course();
+    test_ideal_sensors_read_truth();
+    test_sensor_sample_rates();
+    test_sensor_noise_statistics();
+    test_saturate_and_rate_limit();
+    test_sample_clock();
+    test_integrator_and_differentiator();
+    test_low_pass();
+    test_pid_wraps_angles();
+    test_pid_anti_windup();
+    test_true_control_state();
+    test_autopilot_holds_between_samples();
 
     std::printf("%d/%d passed\n (pray its all right xD)", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;

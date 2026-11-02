@@ -6,6 +6,7 @@
 #include "render/render.hpp"
 #include "world.hpp"
 #include <Eigen/Dense>
+#include <algorithm>
 #include <cmath>
 #include <raylib.h>
 
@@ -47,6 +48,15 @@ int main() {
 
     start();
 
+    // physics steps at the fixed sensor rate Ts rather than frame time, so the analog
+    // sensors get sampled at Ts. the frame time is fed in as whole steps with the left over
+    // getting carried to the next frame
+    //
+    // todo: this should probably still be frame/fixed, but have a system for stepping the analog
+    // sensors independently
+    const double dt_sim = body.sensors.params.Ts;
+    double t_behind = 0.0;
+
     while (!WindowShouldClose()) {
         if (IsKeyPressed(KEY_R)) {
             start();
@@ -59,7 +69,13 @@ int main() {
         }
         const double dt = GetFrameTime();
         body.read_keyboard(dt);
-        world.step(dt);
+
+        // ignore rendering until its caught up (if the sim falls behind the timestep)
+        t_behind += std::min(dt, 0.25);
+        while (t_behind >= dt_sim) {
+            world.step(dt_sim);
+            t_behind -= dt_sim;
+        }
         const Eigen::Matrix3d R_b2i = rotation(body.state.quat());
 
         Matrix transform = rendering::to_rl_transform(R_b2i, body.state.pos());
@@ -87,6 +103,8 @@ int main() {
         uav::rendering::begin();
         DrawModel(model, {0, 0, 0}, 1.0f, GRAY);
         DrawModel(model_fin, {0, 0, 0}, 1.0f, DARKGRAY);
+        uav::rendering::end_3d();
+        uav::rendering::draw_sensor_hud(body);
         uav::rendering::end();
     }
     CloseWindow();

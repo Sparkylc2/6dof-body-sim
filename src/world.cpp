@@ -23,5 +23,10 @@ void World::step(double dt) {
 
     bodies.step(dt);
     t += dt;
+
+    // the sensors get the state after integration/end of the physics step
+    for (auto &bp : bodies.bodies) {
+        bp->sensors.update(*bp, t, sensor_rng);
+    }
 }
 } // namespace uav

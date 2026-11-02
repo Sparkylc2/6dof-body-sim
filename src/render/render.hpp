@@ -1,4 +1,5 @@
 #pragma once
+#include "body.hpp"
 #include <Eigen/Dense>
 #include <raylib.h>
 #include <raymath.h>
@@ -48,7 +49,12 @@ void init_camera(const Eigen::Vector3d &pos, const Eigen::Vector3d &target,
                  const Eigen::Vector3d &up, double fovy);
 
 // begin and end for rendering, wraps BeginMode, clearing background etc.
+// end_3d finishes the 3d part so 2d things (like the hud) can be drawn on top before end
 void begin();
+void end_3d();
 void end();
+
+// text overlay of all the sensor readings next to the original noise free value
+void draw_sensor_hud(const Body &b);
 
 } // namespace uav::rendering

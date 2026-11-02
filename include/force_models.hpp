@@ -5,6 +5,9 @@ namespace uav {
 using Eigen::Vector3d;
 using Eigen::Vector4d;
 
+// gravitational acceleration used for everything (forces and sensors)
+constexpr double GRAVITY = 9.81;
+
 // a force and moment acting on a body, both in the body frame
 struct Wrench {
     Vector3d F = Vector3d::Zero(); // force [fx, fy, fz]
