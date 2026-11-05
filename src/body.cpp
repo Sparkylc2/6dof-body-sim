@@ -67,7 +67,7 @@ Vector3d Drone::keyboard_moment() const {
     return T;
 }
 
-Wrench Drone::wrench(const BodyState &x, const AirState &) const {
+Wrench Drone::wrench(const AircraftState &x, const AirState &) const {
     Wrench w = gravity(m, x.quat());
     w += input;
     return w;
@@ -122,7 +122,7 @@ void FixedWing::read_keyboard(double dt) {
     controls.dt = std::clamp(controls.dt, 0.0, 1.0);
 }
 
-Wrench FixedWing::wrench(const BodyState &x, const AirState &air) const {
+Wrench FixedWing::wrench(const AircraftState &x, const AirState &air) const {
 
     const AirData air_info = air_data(x.vel(), x.quat(), air);
 

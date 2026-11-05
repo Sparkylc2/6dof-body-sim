@@ -3,10 +3,47 @@
 
 namespace uav {
 
-StateVector BodySystem::derivatives(const Body &b, const BodyState &x, const Vector3d &F,
-                                    const Vector3d &T) {
+// --- generic ---
+template <class B> void BodySystem<B>::step(double dt) {
+    for (const std::unique_ptr<B> &body : bodies) {
+        B &b = *body;
+
+        // slope of the state at x, each system works out its own forces inside derivatives
+        auto f = [this, &b](const State &x) { return derivatives(b, x); };
+
+        // --- rk4 ---
+        // the state at the start of the step
+        const State &x0 = b.state;
+        auto offset = [&x0](const Derivative &k, double h) {
+            State x = x0;
+            x.state += h * k;
+            return x;
+        };
+
+        // standard rk4
+        const Derivative k1 = f(x0);
+        const Derivative k2 = f(offset(k1, dt / 2.0));
+        const Derivative k3 = f(offset(k2, dt / 2.0));
+        const Derivative k4 = f(offset(k3, dt));
+        b.state.state += dt / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+
+        // the update makes ||e|| larger than 1, so it needs to be normalised
+        b.state.quat().normalize();
+    }
+}
+
+// --- aircraft ---
+UAVBodySystem::Derivative UAVBodySystem::derivatives(const Body &b, const AircraftState &x) const {
+    // the air is held for the whole step, but the steady wind still gets rotated by each stage's
+    // attitude inside the wrench
+    const Wrench w = b.wrench(x, b.air);
+    return derivatives(b, x, w.F, w.M);
+}
+
+UAVBodySystem::Derivative UAVBodySystem::derivatives(const Body &b, const AircraftState &x,
+                                                     const Vector3d &F, const Vector3d &T) const {
     // the resulting system derivative
-    StateVector x_dot;
+    Derivative x_dot;
 
     // state (b - body, v - vehicle) frame
     const Vector3d vel_b = x.vel();     // u, v, w
@@ -65,36 +102,4 @@ StateVector BodySystem::derivatives(const Body &b, const BodyState &x, const Vec
     return x_dot;
 }
 
-void BodySystem::step(double dt) {
-    for (const std::unique_ptr<Body> &body : bodies) {
-        Body &b = *body;
-
-        // slope of the state at x (current state), with the forces and moments evaluated at x
-        auto f = [this, &b](const BodyState &x) {
-            // the air is held for the whole step, but the steady wind still gets rotated by each
-            // stage's attitude inside the wrench
-            const Wrench w = b.wrench(x, b.air);
-            return derivatives(b, x, w.F, w.M);
-        };
-
-        // --- rk4 ---
-        // the state at the start of the step
-        const BodyState &x0 = b.state;
-        auto offset = [&x0](const StateVector &k, double h) {
-            BodyState x = x0;
-            x.state += h * k;
-            return x;
-        };
-
-        // standard rk4
-        const StateVector k1 = f(x0);
-        const StateVector k2 = f(offset(k1, dt / 2.0));
-        const StateVector k3 = f(offset(k2, dt / 2.0));
-        const StateVector k4 = f(offset(k3, dt));
-        b.state.state += dt / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
-
-        // the update makes ||e|| larger than 1, so it needs to be normalised
-        b.state.quat().normalize();
-    }
-}
 } // namespace uav

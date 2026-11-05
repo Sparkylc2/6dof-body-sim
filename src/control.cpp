@@ -13,7 +13,13 @@ double rate_limit(double u, double u_prev, double rate, double dt) {
 }
 
 bool SampleClock::ready(double t) {
+    // if the sim steps at exactly Ts the floating point randomness would make a sample thats really
+    // ready appear early so we need to add a little to it
+    if (t + 1e-9 < next) {
+        return false;
+    }
     next += Ts;
+
     // if it's fallen behind by more than a sample it just skips
     if (next <= t) {
         next = t + Ts;

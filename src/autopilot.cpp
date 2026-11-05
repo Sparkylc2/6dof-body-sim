@@ -5,7 +5,7 @@
 
 namespace uav {
 
-ControlState true_control_state(const BodyState &x, const AirState &air) {
+ControlState true_control_state(const AircraftState &x, const AirState &air) {
     ControlState s;
 
     s.pn = x.pos().x();

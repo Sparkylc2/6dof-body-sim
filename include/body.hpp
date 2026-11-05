@@ -21,7 +21,8 @@ struct Body {
     Vector4d I = Vector4d::Zero(); // moment of inertia (the four components left after the
                                    // symmetry assumptions, Ix, Iy, Iz, Ixz)
 
-    BodyState state; // carries the full 13 dim state
+    using State = AircraftState; // which state the body carries (what the BodySystem steps)
+    State state;                 // carries the full 13 dim state
 
     // the turbulence state for the body (pointer so any Gust model can go there)
     // (null means no turbulence)
@@ -31,7 +32,7 @@ struct Body {
     Sensors sensors; // onboard sensors readings, gets sampled by the World after the bodies step
 
     // this gets overwritten by subclasses to implement different craft and their specific forces
-    virtual Wrench wrench(const BodyState &x, const AirState &air) const = 0;
+    virtual Wrench wrench(const AircraftState &x, const AirState &air) const = 0;
 
     // the gust pointer makes bodies move only, and declaring the destructor would otherwise stop
     // the moves being generated
@@ -56,7 +57,7 @@ struct Drone : Body {
     Vector3d keyboard_moment() const;
 
     // ignores the air, it's only gravity and the keyboard
-    Wrench wrench(const BodyState &x, const AirState &) const override;
+    Wrench wrench(const AircraftState &x, const AirState &) const override;
 };
 
 // a fixed wing aircraft with the full chapter 4 force model
@@ -72,7 +73,7 @@ struct FixedWing : Body {
     // up/down arrows throttle
     void read_keyboard(double dt);
 
-    Wrench wrench(const BodyState &x, const AirState &air) const override;
+    Wrench wrench(const AircraftState &x, const AirState &air) const override;
 };
 
 // --- factory methods ---

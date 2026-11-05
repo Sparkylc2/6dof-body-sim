@@ -27,7 +27,7 @@ struct ControlState {
 };
 
 // true state of the body
-ControlState true_control_state(const BodyState &x, const AirState &air);
+ControlState true_control_state(const AircraftState &x, const AirState &air);
 
 // --- autopilot ---
 // a discrete controller that turns the reference autopilot commands and state into control inputs

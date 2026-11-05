@@ -63,15 +63,15 @@ static Eigen::Matrix3d inertia_matrix(const Eigen::Vector4d &I) {
 // a body with the zagi's mass properties whose forces and moments are set by each test
 // (no gravity unless a test adds it)
 struct TestBody : uav::Body {
-    std::function<Eigen::Vector3d(const uav::Body &, const uav::BodyState &)> get_forces;
-    std::function<Eigen::Vector3d(const uav::Body &, const uav::BodyState &)> get_moments;
+    std::function<Eigen::Vector3d(const uav::Body &, const uav::AircraftState &)> get_forces;
+    std::function<Eigen::Vector3d(const uav::Body &, const uav::AircraftState &)> get_moments;
 
     TestBody() {
         m = 1.56;
         I << 0.1147, 0.0576, 0.1712, 0.0015;
     }
 
-    uav::Wrench wrench(const uav::BodyState &x, const uav::AirState &) const override {
+    uav::Wrench wrench(const uav::AircraftState &x, const uav::AirState &) const override {
         uav::Wrench w;
         if (get_forces)
             w.F = get_forces(*this, x);
@@ -83,14 +83,16 @@ struct TestBody : uav::Body {
 
 // a system holding one zagi at rest, level, at the origin
 // tests read and write the body through *sys.bodies[0]
-static uav::BodySystem make_zagi_system() {
-    uav::BodySystem sys;
+static uav::UAVBodySystem make_zagi_system() {
+    uav::UAVBodySystem sys;
     sys.bodies.push_back(std::make_unique<TestBody>());
     return sys;
 }
 
 // the test body inside a system made by make_zagi_system
-static TestBody &test_body(uav::BodySystem &sys) { return static_cast<TestBody &>(*sys.bodies[0]); }
+static TestBody &test_body(uav::UAVBodySystem &sys) {
+    return static_cast<TestBody &>(*sys.bodies[0]);
+}
 
 // ---- frames (euler) ----
 static void test_rotation_is_orthonormal() {
@@ -181,7 +183,7 @@ static void test_quat_rate_matches_euler_rates() {
 static void test_constant_force_gives_linear_velocity() {
     auto sys = make_zagi_system();
     const double a = 2.0;
-    test_body(sys).get_forces = [a](const uav::Body &body, const uav::BodyState &) {
+    test_body(sys).get_forces = [a](const uav::Body &body, const uav::AircraftState &) {
         return Eigen::Vector3d(body.m * a, 0, 0);
     };
 
@@ -219,7 +221,7 @@ static void test_angular_accel_from_rest_matches_Jinv() {
     const uav::Body &b = *sys.bodies[0];
     const Eigen::Vector3d moment(0.3, -0.2, 0.1);
 
-    const uav::StateVector x_dot = sys.derivatives(b, b.state, Eigen::Vector3d::Zero(), moment);
+    const uav::StateVector<13> x_dot = sys.derivatives(b, b.state, Eigen::Vector3d::Zero(), moment);
 
     const Eigen::Vector3d expected = inertia_matrix(b.I).inverse() * moment;
     CHECK_VEC_NEAR(x_dot.segment<3>(uav::IDX::RATES), expected, 1e-12);
@@ -234,7 +236,7 @@ static void test_gyroscopic_terms_match_vector_form() {
     const Eigen::Vector3d w0(0.5, -0.3, 0.8);
     b.state.rates() = w0;
 
-    const uav::StateVector x_dot =
+    const uav::StateVector<13> x_dot =
         sys.derivatives(b, b.state, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
 
     const Eigen::Matrix3d J = inertia_matrix(b.I);
@@ -250,7 +252,7 @@ static void test_coriolis_term_matches_vector_form() {
     b.state.rates() = w0;
     b.state.vel() = v0;
 
-    const uav::StateVector x_dot =
+    const uav::StateVector<13> x_dot =
         sys.derivatives(b, b.state, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
 
     CHECK_VEC_NEAR(x_dot.segment<3>(uav::IDX::VEL), -w0.cross(v0), 1e-12);
@@ -262,7 +264,7 @@ static void test_roll_yaw_coupling() {
         auto sys = make_zagi_system();
         TestBody &b = test_body(sys);
         b.I.w() = Ixz;
-        b.get_moments = [](const uav::Body &, const uav::BodyState &) {
+        b.get_moments = [](const uav::Body &, const uav::AircraftState &) {
             return Eigen::Vector3d(0.1, 0, 0);
         };
 
@@ -336,11 +338,11 @@ static void test_pitch_through_vertical() {
 static void test_drone_gravity_only() {
     const uav::Drone d;
 
-    const uav::Wrench level = d.wrench(uav::BodyState(), {});
+    const uav::Wrench level = d.wrench(uav::AircraftState(), {});
     CHECK_VEC_NEAR(level.F, Eigen::Vector3d(0, 0, d.m * 9.81), 1e-12);
     CHECK_VEC_NEAR(level.M, Eigen::Vector3d::Zero(), 1e-15);
 
-    uav::BodyState pitched;
+    uav::AircraftState pitched;
     pitched.quat() = uav::euler_to_quat(0, pi / 2, 0);
     CHECK_VEC_NEAR(d.wrench(pitched, {}).F, Eigen::Vector3d(-d.m * 9.81, 0, 0), 1e-12);
 }
@@ -449,7 +451,7 @@ static void test_zagi_at_rest_is_gravity_only() {
 
 // flying it through the rk4 for a few seconds shouldn't blow up
 static void test_zagi_flies_without_nan() {
-    uav::BodySystem sys;
+    uav::UAVBodySystem sys;
     auto zagi = std::make_unique<uav::FixedWing>(uav::generate_zagi_flying_wing());
     zagi->state.vel() = Eigen::Vector3d(15.0, 0, 0);
     zagi->controls.dt = 0.8;
@@ -528,7 +530,7 @@ static void test_world_calm_matches_body_system() {
         return z;
     };
 
-    uav::BodySystem sys;
+    uav::UAVBodySystem sys;
     sys.bodies.push_back(make_zagi());
     uav::World world;
     world.atmosphere.turbulence = false;
@@ -591,10 +593,10 @@ static void test_specific_force_matches_state_derivatives() {
     zagi.state.rates() = Eigen::Vector3d(0.3, -0.2, 0.15);
     zagi.controls = {-0.1, 0.05, 0.0, 0.8};
 
-    const uav::BodyState &x = zagi.state;
+    const uav::AircraftState &x = zagi.state;
     const uav::Wrench w = zagi.wrench(x, {});
-    uav::BodySystem sys;
-    const uav::StateVector x_dot = sys.derivatives(zagi, x, w.F, w.M);
+    uav::UAVBodySystem sys;
+    const uav::StateVector<13> x_dot = sys.derivatives(zagi, x, w.F, w.M);
 
     const double u = x.vel().x(), v = x.vel().y(), wv = x.vel().z();
     const double p = x.rates().x(), q = x.rates().y(), r = x.rates().z();
@@ -703,7 +705,7 @@ static void test_ideal_sensors_read_truth() {
 
     world.step(0.01);
 
-    const uav::BodyState &x = b.state;
+    const uav::AircraftState &x = b.state;
     const uav::SensorReadings &y = b.sensors.y;
     CHECK_VEC_NEAR(y.gyro, x.rates(), 1e-15);
     CHECK_VEC_NEAR(y.accel, uav::specific_force(b.wrench(x, b.air), b.m, x.quat()), 1e-12);
@@ -889,7 +891,7 @@ static void test_pid_anti_windup() {
 // flying north at 15 m/s ground speed through a crosswind from the east, the nose points into the
 // wind but the course should still be north
 static void test_true_control_state() {
-    uav::BodyState x;
+    uav::AircraftState x;
     x.pos() = Eigen::Vector3d(5, -3, -40);
     const double crab = std::atan2(4.0, 15.0); // nose turned east into the wind
     x.quat() = uav::euler_to_quat(0, 0, crab);

@@ -34,11 +34,11 @@ int main() {
     // level flight trim at 20 m/s, found numerically by solving fx = fz = m = 0 with theta = alpha
     // (for the zagi it was Va 18, alpha 0.071940, trim {-0.197314, 0, 0, 0.783290})
     const double Va_trim = 18, alpha_trim = 0.071940;
-    body.trim = {-0.197314, 0, 0, 0.783290};
+    // body.trim = {-0.197314, 0, 0, 0.783290};
 
     // starts 20 m up, flying north in trimmed level flight
     auto start = [&body, Va_trim, alpha_trim]() {
-        body.state = uav::BodyState();
+        body.state = uav::AircraftState();
         body.state.pos() = Vector3d(0.0, 0.0, -20.0);
         body.state.quat() = euler_to_quat(0.0, alpha_trim, 0.0);
         body.state.vel() =

@@ -7,7 +7,7 @@ namespace uav {
 // describes the world the bodies live in
 struct World {
     AirSystem atmosphere; // atmospheric model for wind and turbulence
-    BodySystem bodies;    // dynamics model for the bodies
+    UAVBodySystem bodies; // dynamics model for the bodies
     double t = 0.0;
 
     // separate from the atmosphere's so changing the sensors doesn't change the turbulence

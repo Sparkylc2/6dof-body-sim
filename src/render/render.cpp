@@ -35,7 +35,7 @@ void end() {
 }
 
 void draw_sensor_hud(const Body &b) {
-    const BodyState &x = b.state;
+    const AircraftState &x = b.state;
     const SensorReadings &y = b.sensors.y;
 
     // the noise free versions of each reading

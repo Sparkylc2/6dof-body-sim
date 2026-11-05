@@ -67,12 +67,14 @@ void Sensors::update(const Body &b, double t, std::mt19937 &rng) {
     auto noise3 = [&]() { return Vector3d(noise(rng), noise(rng), noise(rng)); };
 
     const SensorParams &p = params;
-    const BodyState &x = b.state;
+    const AircraftState &x = b.state;
 
     // a sensor is ready to be measured once t gets to next sample time,
     // if the sim step is longer than the sensor period the missed samples are just dropped
+    // (the 1e-9 is so floating point build up in next doesn't make a sample that's exactly due look
+    // a hair early, when the sim steps at exactly Ts that sample would otherwise be lost)
     auto ready = [t](double &next, double Ts) {
-        if (t < next)
+        if (t + 1e-9 < next)
             return false;
 
         next += Ts;
