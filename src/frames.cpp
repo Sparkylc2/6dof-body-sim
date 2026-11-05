@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace uav {
+namespace BSIM {
 
 Matrix3d rotation_euler(double phi, double theta, double psi) {
     const double c_ph = std::cos(phi), s_ph = std::sin(phi);
@@ -87,4 +87,4 @@ Vector3d quat_to_euler(const Vector4d &e) {
     return Vector3d{phi, theta, psi};
 }
 
-} // namespace uav
+} // namespace BSIM

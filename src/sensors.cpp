@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace uav {
+namespace BSIM {
 
 Vector3d specific_force(const Wrench &w, double m, const Vector4d &e) {
     // the mass doesn't feel gravity relative to the case (it pulls on both the same),
@@ -148,4 +148,4 @@ void Sensors::update(const Body &b, double t, std::mt19937 &rng) {
     }
 }
 
-} // namespace uav
+} // namespace BSIM

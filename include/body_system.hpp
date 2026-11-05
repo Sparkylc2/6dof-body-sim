@@ -6,8 +6,9 @@
 #include "body.hpp"
 #include "body_state.hpp"
 #include "force_models.hpp"
+#include "spacecraft.hpp"
 
-namespace uav {
+namespace BSIM {
 using Eigen::Ref;
 using Eigen::Vector3d;
 using Eigen::Vector4d;
@@ -46,8 +47,9 @@ struct UAVBodySystem : BodySystem<Body> {
                            const Vector3d &T) const;
 };
 
-// for spacecraft (with no axes of symmetry, so full I tensor), once there's a Spacecraft body
-// with using State = SpacecraftState it's just
-//   struct SpacecraftBodySystem : BodySystem<Spacecraft> ...
+// for spacecraft (with no axes of symmetry, so full J tensor)
+struct SpacecraftBodySystem : BodySystem<Spacecraft> {
+    Derivative derivatives(const Spacecraft &s, const SpacecraftState &x) const override;
+};
 
-} // namespace uav
+} // namespace BSIM

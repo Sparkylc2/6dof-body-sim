@@ -1,7 +1,7 @@
 #pragma once
 #include <limits>
 
-namespace uav {
+namespace BSIM {
 
 constexpr double INF = std::numeric_limits<double>::infinity();
 
@@ -115,4 +115,4 @@ private:
     double output(double e, double d_term, double dt, double ff);
 };
 
-} // namespace uav
+} // namespace BSIM

@@ -1,7 +1,7 @@
 #include "world.hpp"
 #include "frames.hpp"
 
-namespace uav {
+namespace BSIM {
 
 void World::step(double dt) {
     for (auto &bp : bodies.bodies) {
@@ -29,4 +29,4 @@ void World::step(double dt) {
         bp->sensors.update(*bp, t, sensor_rng);
     }
 }
-} // namespace uav
+} // namespace BSIM

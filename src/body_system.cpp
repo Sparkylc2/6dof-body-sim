@@ -1,7 +1,7 @@
 #include "body_system.hpp"
 #include "frames.hpp"
 
-namespace uav {
+namespace BSIM {
 
 // --- generic ---
 template <class B> void BodySystem<B>::step(double dt) {
@@ -50,18 +50,18 @@ UAVBodySystem::Derivative UAVBodySystem::derivatives(const Body &b, const Aircra
     const Vector3d rates_b = x.rates(); // p, q, r
 
     // moment of inertia
-    const Vector4d I = b.I;
+    const Vector4d J = b.J;
 
     // factors in the final expression (B.4) for body angular accel
-    const double g = 1.0 / (I.x() * I.z() - I.w() * I.w());
-    const double g1 = g * I.w() * (I.x() - I.y() + I.z());
-    const double g2 = g * (I.z() * I.z() - I.z() * I.y() + I.w() * I.w());
-    const double g3 = g * I.z();
-    const double g4 = g * I.w();
-    const double g5 = (I.z() - I.x()) / I.y();
-    const double g6 = I.w() / I.y();
-    const double g7 = g * (I.x() * I.x() - I.y() * I.x() + I.w() * I.w());
-    const double g8 = g * I.x();
+    const double g = 1.0 / (J.x() * J.z() - J.w() * J.w());
+    const double g1 = g * J.w() * (J.x() - J.y() + J.z());
+    const double g2 = g * (J.z() * J.z() - J.z() * J.y() + J.w() * J.w());
+    const double g3 = g * J.z();
+    const double g4 = g * J.w();
+    const double g5 = (J.z() - J.x()) / J.y();
+    const double g6 = J.w() / J.y();
+    const double g7 = g * (J.x() * J.x() - J.y() * J.x() + J.w() * J.w());
+    const double g8 = g * J.x();
 
     // --- body-frame translational dynamics ---
     // the -w x v_b term is from differentiating in the rotating frame
@@ -87,7 +87,7 @@ UAVBodySystem::Derivative UAVBodySystem::derivatives(const Body &b, const Aircra
 
     // body-frame torques
     ang_accel_b.x() += g3 * T.x() + g4 * T.z();
-    ang_accel_b.y() += T.y() / I.y();
+    ang_accel_b.y() += T.y() / J.y();
     ang_accel_b.z() += g4 * T.x() + g8 * T.z();
 
     // velocity of the body in inertial frame
@@ -102,4 +102,59 @@ UAVBodySystem::Derivative UAVBodySystem::derivatives(const Body &b, const Aircra
     return x_dot;
 }
 
-} // namespace uav
+// --- spacecraft ---
+SpacecraftBodySystem::Derivative SpacecraftBodySystem::derivatives(const Spacecraft &s,
+                                                                   const SpacecraftState &x) const {
+    const SpacecraftParams &p = s.params;
+    const SpacecraftEnvironment &env = s.env;
+
+    // the resulting system derivative
+    Derivative x_dot;
+
+    const Vector3d r = x.pos(); // inertial
+    const Vector3d w = x.rates();
+    const Vector3d l = x.wheel_mom();
+    const Matrix3d R = rotation(x.quat()); // body to inertial
+    const MassProperties mp =
+        mass_properties(p, x.mass()); // the cm and inertia will move/change with fuel burn
+
+    // thrust force and torque about the current cm, and the fuel burn info
+    const ThrusterOutput th = thrust(p, s.controls.throttle, mp.r_cm, x.mass());
+
+    // -- translational accel --- (it's all in the inertial frame so no cross term this time)
+    // thrust + gravity + equatorial bulge
+    Vector3d accel = R * th.wrench.F / mp.m;
+    if (env.gravity)
+        accel += two_body_gravity(r);
+    if (env.j2)
+        accel += j2_gravity(r);
+
+    // --- rotational accel ---
+    // thrust + gravity_gradient
+    Vector3d tau = th.wrench.M;
+    if (env.gravity && env.gravity_gradient)
+        tau += gravity_gradient_torque(R.transpose() * r, mp.J);
+
+    // the wheels have a torque about their axis so the satellite will feel
+    // -A * tau_m (ie A gets torque from the wheel frame to the body frame)
+    const Vector3d tau_m = wheel_motor_torque(p.wheels, s.controls.wheel_torque, l);
+    const Matrix3d &A = p.wheels.A;
+    const Vector3d l_w = A * l; // wheel momentum in body axes
+
+    // euler with the wheels is:
+    // J_s * w_dot + h_w_dot + w cross (J_s*w + h_w) = tau
+    // (J would change as fuel is used but i'm assuming it's really small so it's left out)
+    const Vector3d w_dot = mp.J_s.inverse() * (tau - A * tau_m - w.cross(mp.J_s * w + l_w));
+
+    x_dot.segment<3>(IDX::POS) = x.vel();
+    x_dot.segment<3>(IDX::VEL) = accel;
+    x_dot.segment<4>(IDX::QUAT) = quat_rate(x.quat(), w);
+    x_dot.segment<3>(IDX::RATES) = w_dot;
+    // the motor torque is the change in each wheel's axial momentum by definition so
+    x_dot.segment<3>(SPACECRAFT_IDX::S_REACTION_WHEEL_MOM) = tau_m;
+    x_dot(SPACECRAFT_IDX::S_MASS) = th.m_dot;
+
+    return x_dot;
+}
+
+} // namespace BSIM

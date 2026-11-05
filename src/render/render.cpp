@@ -2,7 +2,7 @@
 #include "frames.hpp"
 #include "sensors.hpp"
 
-namespace uav::rendering {
+namespace BSIM::rendering {
 
 Camera3D CAMERA = {};
 
@@ -67,4 +67,4 @@ void draw_sensor_hud(const Body &b) {
     line(TextFormat("gps course deg %7.2f   (%7.2f)", y.gps_course * r2d, Vg_chi.y() * r2d));
 }
 
-} // namespace uav::rendering
+} // namespace BSIM::rendering

@@ -2,16 +2,16 @@
 #include <algorithm>
 #include <raylib.h>
 
-namespace uav {
+namespace BSIM {
 
 // --- drone ---
 Drone::Drone() {
     m = 1.56;
 
-    const double Ix = 0.1147, Iy = 0.0576, Iz = 0.1712, Ixz = 0.0015;
+    const double Jx = 0.1147, Jy = 0.0576, Jz = 0.1712, Jxz = 0.0015;
 
     // following the symmetry assumption that airplanes use
-    I << Ix, Iy, Iz, Ixz;
+    J << Jx, Jy, Jz, Jxz;
 }
 
 void Drone::read_keyboard() {
@@ -74,9 +74,9 @@ Wrench Drone::wrench(const AircraftState &x, const AirState &) const {
 }
 
 // --- fixed wing ---
-FixedWing::FixedWing(double m, const Vector4d &I, const FixedWingParams &params) : params(params) {
+FixedWing::FixedWing(double m, const Vector4d &J, const FixedWingParams &params) : params(params) {
     this->m = m;
-    this->I = I;
+    this->J = J;
 }
 
 void FixedWing::read_keyboard(double dt) {
@@ -136,7 +136,7 @@ Wrench FixedWing::wrench(const AircraftState &x, const AirState &air) const {
 // factories for the fixed wing
 FixedWing generate_zagi_flying_wing() {
     const double m = 1.56;
-    const double Ix = 0.1147, Iy = 0.0576, Iz = 0.1712, Ixz = 0.0015;
+    const double Jx = 0.1147, Jy = 0.0576, Jz = 0.1712, Jxz = 0.0015;
 
     // the zagi is a flying wing with elevons and no rudder, so all the dr coefficients stay 0
     const FixedWingParams p{
@@ -185,13 +185,13 @@ FixedWing generate_zagi_flying_wing() {
         .k_Omega = 0.0,
     };
 
-    return FixedWing(m, Vector4d(Ix, Iy, Iz, Ixz), p);
+    return FixedWing(m, Vector4d(Jx, Jy, Jz, Jxz), p);
 }
 
 FixedWing generate_sport_drone() {
     // a ~1.4 m span aerobatic plane with a conventional tail, light and stiff in roll
     const double m = 1.8;
-    const double Ix = 0.06, Iy = 0.09, Iz = 0.14, Ixz = 0.002;
+    const double Jx = 0.06, Jy = 0.09, Jz = 0.14, Jxz = 0.002;
 
     const FixedWingParams p{
         .S = 0.35,
@@ -242,7 +242,7 @@ FixedWing generate_sport_drone() {
         .k_Omega = 0.0,
     };
 
-    return FixedWing(m, Vector4d(Ix, Iy, Iz, Ixz), p);
+    return FixedWing(m, Vector4d(Jx, Jy, Jz, Jxz), p);
 }
 
-} // namespace uav
+} // namespace BSIM

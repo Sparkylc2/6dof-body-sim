@@ -3,7 +3,7 @@
 #include "frames.hpp"
 #include <cmath>
 
-namespace uav {
+namespace BSIM {
 
 Wrench gravity(double m, const Vector4d &e) {
     Wrench w;
@@ -36,4 +36,4 @@ AirData air_data(const Vector3d &vel_ground_b, const Vector4d &quat, const AirSt
     return air_info;
 }
 
-} // namespace uav
+} // namespace BSIM

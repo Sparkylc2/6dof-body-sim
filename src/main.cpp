@@ -10,12 +10,13 @@
 #include <cmath>
 #include <raylib.h>
 
-using namespace uav;
+using namespace BSIM;
+
 int main() {
     bool first_person = false;
 
-    uav::rendering::init_rendering();
-    uav::rendering::init_camera({-10.0, -6.0, -6.0}, {0, 0, 0}, {0, 0, -1}, 45.0);
+    BSIM::rendering::init_rendering();
+    BSIM::rendering::init_camera({-10.0, -6.0, -6.0}, {0, 0, 0}, {0, 0, -1}, 45.0);
     // the mesh is in raylib axes: x_rl is body y (span), y_rl is -body z, z_rl is -body x (chord)
     Mesh mesh = GenMeshCube(1.4224f, 0.05f, 0.3302f);
     // a small fin on top so the roll and which way is up are visible
@@ -24,11 +25,11 @@ int main() {
     Model model = LoadModelFromMesh(mesh);
     Model model_fin = LoadModelFromMesh(mesh_fin);
 
-    uav::World world;
-    auto plane = std::make_unique<uav::FixedWing>(generate_sport_drone());
+    BSIM::World world;
+    auto plane = std::make_unique<BSIM::FixedWing>(generate_sport_drone());
     //
-    // auto plane = std::make_unique<uav::FixedWing>(generate_zagi_flying_wing());
-    uav::FixedWing &body = *plane;
+    // auto plane = std::make_unique<BSIM::FixedWing>(generate_zagi_flying_wing());
+    BSIM::FixedWing &body = *plane;
     world.bodies.bodies.push_back(std::move(plane));
 
     // level flight trim at 20 m/s, found numerically by solving fx = fz = m = 0 with theta = alpha
@@ -38,7 +39,7 @@ int main() {
 
     // starts 20 m up, flying north in trimmed level flight
     auto start = [&body, Va_trim, alpha_trim]() {
-        body.state = uav::AircraftState();
+        body.state = BSIM::AircraftState();
         body.state.pos() = Vector3d(0.0, 0.0, -20.0);
         body.state.quat() = euler_to_quat(0.0, alpha_trim, 0.0);
         body.state.vel() =
@@ -96,16 +97,16 @@ int main() {
             const double psi = quat_to_euler(body.state.quat()).z();
             const Vector3d behind(-std::cos(psi), -std::sin(psi), 0.0);
             const Vector3d pos = body.state.pos();
-            uav::rendering::init_camera(pos + 6.0 * behind + Vector3d(0, 0, -1.5), pos, {0, 0, -1},
+            BSIM::rendering::init_camera(pos + 6.0 * behind + Vector3d(0, 0, -1.5), pos, {0, 0, -1},
                                         45.0);
         }
 
-        uav::rendering::begin();
+        BSIM::rendering::begin();
         DrawModel(model, {0, 0, 0}, 1.0f, GRAY);
         DrawModel(model_fin, {0, 0, 0}, 1.0f, DARKGRAY);
-        uav::rendering::end_3d();
-        uav::rendering::draw_sensor_hud(body);
-        uav::rendering::end();
+        BSIM::rendering::end_3d();
+        BSIM::rendering::draw_sensor_hud(body);
+        BSIM::rendering::end();
     }
     CloseWindow();
 }

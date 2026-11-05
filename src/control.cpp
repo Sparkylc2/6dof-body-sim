@@ -2,7 +2,7 @@
 #include "sensors.hpp" // wrap_angle
 #include <algorithm>
 
-namespace uav {
+namespace BSIM {
 
 // --- basic blocks ---
 double saturate(double u, double lo, double hi) { return std::clamp(u, lo, hi); }
@@ -133,4 +133,4 @@ void PID::reset() {
     u = 0.0;
 }
 
-} // namespace uav
+} // namespace BSIM

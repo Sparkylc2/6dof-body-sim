@@ -1,7 +1,7 @@
 #pragma once
 #include "air_system.hpp"
 #include <Eigen/Dense>
-namespace uav {
+namespace BSIM {
 using Eigen::Vector3d;
 using Eigen::Vector4d;
 
@@ -33,4 +33,4 @@ struct AirData {
 // from eqn 2.8
 AirData air_data(const Vector3d &vel_ground_b, const Vector4d &quat, const AirState &air);
 
-} // namespace uav
+} // namespace BSIM

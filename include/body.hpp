@@ -8,7 +8,7 @@
 #include "force_models/fixed_wing_model.hpp"
 #include "sensors.hpp"
 
-namespace uav {
+namespace BSIM {
 using Eigen::Ref;
 using Eigen::Vector3d;
 using Eigen::Vector4d;
@@ -18,8 +18,8 @@ using Eigen::Vector4d;
 // everything is in SI
 struct Body {
     double m = 0.0;                // mass
-    Vector4d I = Vector4d::Zero(); // moment of inertia (the four components left after the
-                                   // symmetry assumptions, Ix, Iy, Iz, Ixz)
+    Vector4d J = Vector4d::Zero(); // moment of inertia (the four components left after the
+                                   // symmetry assumptions, Jx, Jy, Jz, Jxz)
 
     using State = AircraftState; // which state the body carries (what the BodySystem steps)
     State state;                 // carries the full 13 dim state
@@ -67,7 +67,7 @@ struct FixedWing : Body {
     FixedWingControls controls; // control derivatives
     FixedWingControls trim;     // static control values for trim (can equally be 0)
 
-    FixedWing(double m, const Vector4d &I, const FixedWingParams &params);
+    FixedWing(double m, const Vector4d &J, const FixedWingParams &params);
 
     // w/s elevator (nose down/up), a/d aileron (roll left/right), q/e rudder (yaw left/right),
     // up/down arrows throttle
@@ -84,4 +84,4 @@ FixedWing generate_zagi_flying_wing();
 // generates an imaginary sport plane (not from the book) with the same force model but much more
 // control authority, strong yaw stability, very little adverse yaw and about 2x thrust to weight
 FixedWing generate_sport_drone();
-} // namespace uav
+} // namespace BSIM

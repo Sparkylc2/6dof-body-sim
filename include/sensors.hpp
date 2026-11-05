@@ -5,7 +5,7 @@
 
 #include "force_models.hpp"
 
-namespace uav {
+namespace BSIM {
 using Eigen::Vector2d;
 using Eigen::Vector3d;
 using Eigen::Vector4d;
@@ -110,4 +110,4 @@ Vector2d ground_speed_course(const Vector3d &vel_i);
 // wraps an angle into [-pi, pi]
 double wrap_angle(double a);
 
-} // namespace uav
+} // namespace BSIM

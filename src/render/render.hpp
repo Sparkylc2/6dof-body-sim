@@ -4,7 +4,7 @@
 #include <raylib.h>
 #include <raymath.h>
 
-namespace uav::rendering {
+namespace BSIM::rendering {
 
 extern Camera3D CAMERA; // global camera
 
@@ -57,4 +57,4 @@ void end();
 // text overlay of all the sensor readings next to the original noise free value
 void draw_sensor_hud(const Body &b);
 
-} // namespace uav::rendering
+} // namespace BSIM::rendering

@@ -2,7 +2,7 @@
 #include "air_system.hpp"
 #include "body_system.hpp"
 
-namespace uav {
+namespace BSIM {
 
 // describes the world the bodies live in
 struct World {
@@ -16,4 +16,4 @@ struct World {
     // steps the atmosphere and the bodies, then samples each body's sensors
     void step(double dt);
 };
-} // namespace uav
+} // namespace BSIM

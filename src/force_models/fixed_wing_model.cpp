@@ -1,7 +1,7 @@
 #include "force_models/fixed_wing_model.hpp"
 #include <numbers>
 
-namespace uav {
+namespace BSIM {
 
 double stall_blend(const FixedWingParams &p, double alpha) {
     // alpha is in [-pi, pi] (from atan2) so with M around 50 these stay well inside a double
@@ -92,4 +92,4 @@ Wrench propulsion(const FixedWingParams &p, const AirData &air, double dt) {
     w.M.x() = -p.k_Tp * prop_rate * prop_rate;
     return w;
 }
-} // namespace uav
+} // namespace BSIM

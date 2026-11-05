@@ -4,7 +4,7 @@
 #include "control.hpp"
 #include "force_models/fixed_wing_model.hpp"
 
-namespace uav {
+namespace BSIM {
 
 // what the autopilot gets told to do
 // this is just a sketch from my year 2 lab
@@ -48,4 +48,4 @@ struct Autopilot {
     virtual ~Autopilot() = default;
 };
 
-} // namespace uav
+} // namespace BSIM

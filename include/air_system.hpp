@@ -1,7 +1,7 @@
 #pragma once
 #include <Eigen/Dense>
 #include <random>
-namespace uav {
+namespace BSIM {
 using Eigen::Vector2d;
 using Eigen::Vector3d;
 
@@ -53,4 +53,4 @@ struct DrydenGust : Gust {
     Vector3d step(double Va, double dt, std::mt19937 &rng) override;
 };
 
-} // namespace uav
+} // namespace BSIM

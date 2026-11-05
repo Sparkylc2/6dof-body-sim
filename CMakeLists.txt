@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(uav_sim LANGUAGES CXX)
+project(bsim LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,17 +13,19 @@ add_compile_options($<$<CONFIG:Debug>:-fsanitize=address,undefined>)
 add_link_options($<$<CONFIG:Debug>:-fsanitize=address,undefined>)
 add_compile_definitions($<$<CONFIG:Debug>:EIGEN_INITIALIZE_MATRICES_BY_NAN>)
 
-set(UAV_WARNINGS -Wall -Wextra -Wpedantic -Werror)
+set(BSIM_WARNINGS -Wall -Wextra -Wpedantic -Werror)
 
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(raylib REQUIRED)
 
 
-add_library(uav_core STATIC
+add_library(bsim_core STATIC
   src/frames.cpp
   src/force_models.cpp
   src/force_models/fixed_wing_model.cpp
+  src/force_models/spacecraft_model.cpp
   src/body.cpp
+  src/spacecraft.cpp
   src/body_system.cpp
   src/air_system.cpp
   src/sensors.cpp
@@ -31,23 +33,23 @@ add_library(uav_core STATIC
   src/autopilot.cpp
   src/world.cpp
 )
-target_include_directories(uav_core PUBLIC include)
-target_link_libraries(uav_core PUBLIC Eigen3::Eigen PRIVATE raylib)
-target_compile_options(uav_core PRIVATE ${UAV_WARNINGS})
+target_include_directories(bsim_core PUBLIC include)
+target_link_libraries(bsim_core PUBLIC Eigen3::Eigen PRIVATE raylib)
+target_compile_options(bsim_core PRIVATE ${BSIM_WARNINGS})
 
-add_library(uav_render STATIC
+add_library(bsim_render STATIC
   src/render/render.cpp
 )
-target_include_directories(uav_render PUBLIC src)
-target_link_libraries(uav_render PUBLIC uav_core raylib)
-target_compile_options(uav_render PRIVATE ${UAV_WARNINGS})
+target_include_directories(bsim_render PUBLIC src)
+target_link_libraries(bsim_render PUBLIC bsim_core raylib)
+target_compile_options(bsim_render PRIVATE ${BSIM_WARNINGS})
 
-add_executable(uav_sim src/main.cpp)
-target_link_libraries(uav_sim PRIVATE uav_render)
-target_compile_options(uav_sim PRIVATE ${UAV_WARNINGS})
+add_executable(bsim src/main.cpp)
+target_link_libraries(bsim PRIVATE bsim_render)
+target_compile_options(bsim PRIVATE ${BSIM_WARNINGS})
 
 enable_testing()
-add_executable(uav_tests tests/test_main.cpp)
-target_link_libraries(uav_tests PRIVATE uav_core)
-target_compile_options(uav_tests PRIVATE ${UAV_WARNINGS})
-add_test(NAME uav_tests COMMAND uav_tests)
+add_executable(bsim_tests tests/test_main.cpp)
+target_link_libraries(bsim_tests PRIVATE bsim_core)
+target_compile_options(bsim_tests PRIVATE ${BSIM_WARNINGS})
+add_test(NAME bsim_tests COMMAND bsim_tests)

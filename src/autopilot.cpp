@@ -3,7 +3,7 @@
 #include "frames.hpp"
 #include "sensors.hpp" // ground_speed_course
 
-namespace uav {
+namespace BSIM {
 
 ControlState true_control_state(const AircraftState &x, const AirState &air) {
     ControlState s;
@@ -42,4 +42,4 @@ const FixedWingControls &Autopilot::step(double t, const AutopilotCommands &cmd,
     return controls;
 }
 
-} // namespace uav
+} // namespace BSIM

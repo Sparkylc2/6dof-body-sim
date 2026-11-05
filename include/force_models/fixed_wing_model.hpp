@@ -2,7 +2,7 @@
 #include "force_models.hpp"
 #include <Eigen/Dense>
 
-namespace uav {
+namespace BSIM {
 // gravity on a body of mass m with attitude e (quaternion)
 // acts at the center of mass so there's no moment
 Wrench gravity(double m, const Vector4d &e);
@@ -67,4 +67,4 @@ Wrench lateral_aero(const FixedWingParams &p, const AirData &air, const Vector3d
 // this assumes it the thrustline goes through the centroid
 // from eqn 4.18 (thrust force), and eqn 4.20 (prop gyro moment)
 Wrench propulsion(const FixedWingParams &p, const AirData &air, double dt);
-} // namespace uav
+} // namespace BSIM

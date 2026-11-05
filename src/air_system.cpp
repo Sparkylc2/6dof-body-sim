@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace uav {
+namespace BSIM {
 
 Vector3d DrydenGust::step(double Va, double dt, std::mt19937 &rng) {
     std::normal_distribution<double> noise(0.0, 1.0);
@@ -41,4 +41,4 @@ Vector3d DrydenGust::step(double Va, double dt, std::mt19937 &rng) {
     return {u_g, v_g, w_g};
 }
 
-} // namespace uav
+} // namespace BSIM

@@ -1,7 +1,7 @@
 #pragma once
 #include <Eigen/Dense>
 
-namespace uav {
+namespace BSIM {
 using Eigen::Ref;
 using Vector1d = Eigen::Vector<double, 1>;
 using Eigen::Vector3d;
@@ -23,7 +23,7 @@ enum SPACECRAFT_IDX {
 };
 
 // --- rigid body state ---
-// the part of the state every body has, [pos | vel | quat | rates | extras...]
+// the part of the state body has, [pos | vel | quat | rates | extras...]
 // specific bodies inherit this with their own size, and add accessors for whatever extra state
 // they put after the rates
 template <int N> struct RigidBodyState {
@@ -61,7 +61,9 @@ struct AircraftState : RigidBodyState<13> {};
 // [x y z | vx vy vz | e0 e1 e2 e3 | p q r | h_wx h_wy h_wz | m]
 // (pos and vel are both in the inertial frame)
 struct SpacecraftState : RigidBodyState<17> {
-    // reaction wheel momentum (body FoR) [h_wx, h_wy, h_wz]
+    // each reaction wheel's total momentum along its own spin axis [h_1, h_2, h_3],
+    // i'm probably going to keep the wheels aligned with the body axes so its just the same
+    // as the body components
     Ref<Vector3d> wheel_mom() { return state.segment<3>(S_REACTION_WHEEL_MOM); }
     // total mass
     double &mass() { return state(S_MASS); }
@@ -70,4 +72,4 @@ struct SpacecraftState : RigidBodyState<17> {
     double mass() const { return state(S_MASS); }
 };
 
-} // namespace uav
+} // namespace BSIM

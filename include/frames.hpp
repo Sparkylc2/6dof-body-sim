@@ -2,7 +2,7 @@
 #pragma once
 #include <Eigen/Dense>
 
-namespace uav {
+namespace BSIM {
 using Eigen::Matrix3d;
 using Eigen::Matrix4d;
 using Eigen::Vector3d;
@@ -31,4 +31,4 @@ Vector4d quat_rate(const Vector4d &e, const Vector3d &w);
 Vector4d euler_to_quat(double phi, double theta, double psi);
 Vector3d quat_to_euler(const Vector4d &e);
 
-} // namespace uav
+} // namespace BSIM
