@@ -26,9 +26,9 @@ int main() {
     Model model_fin = LoadModelFromMesh(mesh_fin);
 
     BSIM::World world;
-    auto plane = std::make_unique<BSIM::FixedWing>(generate_sport_drone());
-    //
     // auto plane = std::make_unique<BSIM::FixedWing>(generate_zagi_flying_wing());
+    //
+    auto plane = std::make_unique<BSIM::FixedWing>(generate_zagi_flying_wing());
     BSIM::FixedWing &body = *plane;
     world.bodies.bodies.push_back(std::move(plane));
 
@@ -98,7 +98,7 @@ int main() {
             const Vector3d behind(-std::cos(psi), -std::sin(psi), 0.0);
             const Vector3d pos = body.state.pos();
             BSIM::rendering::init_camera(pos + 6.0 * behind + Vector3d(0, 0, -1.5), pos, {0, 0, -1},
-                                        45.0);
+                                         45.0);
         }
 
         BSIM::rendering::begin();
