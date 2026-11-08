@@ -4,6 +4,7 @@
 #include "control.hpp"
 #include "force_models/fixed_wing_model.hpp"
 #include "frames.hpp"
+#include "lateral_autopilot.hpp"
 #include "sensors.hpp"
 #include "spacecraft.hpp"
 #include "world.hpp"
@@ -222,7 +223,8 @@ static void test_angular_accel_from_rest_matches_Jinv() {
     const BSIM::Body &b = *sys.bodies[0];
     const Eigen::Vector3d moment(0.3, -0.2, 0.1);
 
-    const BSIM::StateVector<13> x_dot = sys.derivatives(b, b.state, Eigen::Vector3d::Zero(), moment);
+    const BSIM::StateVector<13> x_dot =
+        sys.derivatives(b, b.state, Eigen::Vector3d::Zero(), moment);
 
     const Eigen::Vector3d expected = inertia_matrix(b.J).inverse() * moment;
     CHECK_VEC_NEAR(x_dot.segment<3>(BSIM::IDX::RATES), expected, 1e-12);
@@ -425,7 +427,8 @@ static void test_pitch_stability() {
 // with no sideslip, roll or yaw rate, aileron or rudder there's nothing lateral
 static void test_lateral_symmetry() {
     const BSIM::FixedWingParams p = BSIM::generate_zagi_flying_wing().params;
-    const BSIM::Wrench w = BSIM::lateral_aero(p, {15.0, 0.1, 0.0}, Eigen::Vector3d(0, 0.3, 0), 0, 0);
+    const BSIM::Wrench w =
+        BSIM::lateral_aero(p, {15.0, 0.1, 0.0}, Eigen::Vector3d(0, 0.3, 0), 0, 0);
     CHECK_VEC_NEAR(w.F, Eigen::Vector3d::Zero(), 1e-15);
     CHECK_VEC_NEAR(w.M, Eigen::Vector3d::Zero(), 1e-15);
 }
@@ -623,7 +626,8 @@ static void test_specific_force_free_fall_and_hover() {
 
     // zero net force (eg sitting on a table) is the same reading for any attitude, -R^T [0 0 g]
     const Eigen::Vector4d tilted = BSIM::euler_to_quat(0.3, -0.2, 1.0);
-    const Eigen::Vector3d expect = -BSIM::rotation(tilted).transpose() * Eigen::Vector3d(0, 0, 9.81);
+    const Eigen::Vector3d expect =
+        -BSIM::rotation(tilted).transpose() * Eigen::Vector3d(0, 0, 9.81);
     CHECK_VEC_NEAR(BSIM::specific_force(BSIM::Wrench(), d.m, tilted), expect, 1e-12);
     CHECK_VEC_NEAR(BSIM::specific_force(BSIM::Wrench(), d.m, level), Eigen::Vector3d(0, 0, -9.81),
                    1e-12);
@@ -912,7 +916,7 @@ static void test_true_control_state() {
 struct CountingAutopilot : BSIM::Autopilot {
     int n = 0;
     BSIM::FixedWingControls update(const BSIM::AutopilotCommands &,
-                                  const BSIM::ControlState &) override {
+                                   const BSIM::ControlState &) override {
         ++n;
         return {.dt = 0.01 * n};
     }
@@ -927,6 +931,9 @@ static void test_autopilot_holds_between_samples() {
     CHECK(ap.n == 20);
     CHECK_NEAR(ap.controls.dt, 0.2, 1e-12);
 }
+
+// ---- lateral autopilot ----
+// todo: write tests for this
 
 // ---- spacecraft ----
 // these i actually wrote myself

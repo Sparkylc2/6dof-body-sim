@@ -31,6 +31,7 @@ add_library(bsim_core STATIC
   src/sensors.cpp
   src/control.cpp
   src/autopilot.cpp
+  src/lateral_autopilot.cpp
   src/world.cpp
 )
 target_include_directories(bsim_core PUBLIC include)
