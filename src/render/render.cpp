@@ -7,7 +7,7 @@ namespace BSIM::rendering {
 Camera3D CAMERA = {};
 
 void init_rendering() {
-    InitWindow(1280, 720, "uav_sim");
+    InitWindow(1280, 720, "bsim");
     SetTargetFPS(60);
 }
 
@@ -20,11 +20,13 @@ void init_camera(const Eigen::Vector3d &pos, const Eigen::Vector3d &target,
     CAMERA.projection = CAMERA_PERSPECTIVE;
 }
 
-void begin() {
+void begin(Color background, bool ground) {
     BeginDrawing();
-    ClearBackground(RAYWHITE);
+    ClearBackground(background);
     BeginMode3D(CAMERA);
-    DrawGrid(200, 5.0f); // 1 km across so there's still ground to see at flying speed
+    if (ground) {
+        DrawGrid(200, 5.0f); // 1 km across so there's still ground to see at flying speed
+    }
 }
 
 void end_3d() { EndMode3D(); }

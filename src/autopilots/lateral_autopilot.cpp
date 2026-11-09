@@ -1,4 +1,4 @@
-#include "lateral_autopilot.hpp"
+#include "autopilots/lateral_autopilot.hpp"
 #include "force_models.hpp" // GRAVITY
 #include <cmath>
 

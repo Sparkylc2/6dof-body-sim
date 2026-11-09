@@ -31,4 +31,10 @@ Vector4d quat_rate(const Vector4d &e, const Vector3d &w);
 Vector4d euler_to_quat(double phi, double theta, double psi);
 Vector3d quat_to_euler(const Vector4d &e);
 
+// hamilton product p (x) q (scalar first)
+Vector4d quat_mul(const Vector4d &p, const Vector4d &q);
+
+// conjugate for unit quaternion
+Vector4d quat_conj(const Vector4d &q);
+
 } // namespace BSIM

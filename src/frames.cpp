@@ -87,4 +87,16 @@ Vector3d quat_to_euler(const Vector4d &e) {
     return Vector3d{phi, theta, psi};
 }
 
+Vector4d quat_mul(const Vector4d &p, const Vector4d &q) {
+    const double p0 = p(0), q0 = q(0);
+    const Vector3d pv = p.tail<3>(), qv = q.tail<3>();
+
+    // [p0 q0 - pv.qv, p0 qv + q0 pv + pv x qv]
+    Vector4d r;
+    r << p0 * q0 - pv.dot(qv), p0 * qv + q0 * pv + pv.cross(qv);
+    return r;
+}
+
+Vector4d quat_conj(const Vector4d &q) { return Vector4d{q(0), -q(1), -q(2), -q(3)}; }
+
 } // namespace BSIM

@@ -30,8 +30,9 @@ add_library(bsim_core STATIC
   src/air_system.cpp
   src/sensors.cpp
   src/control.cpp
-  src/autopilot.cpp
-  src/lateral_autopilot.cpp
+  src/autopilots/autopilot.cpp
+  src/autopilots/lateral_autopilot.cpp
+  src/autopilots/attitude_control.cpp
   src/world.cpp
 )
 target_include_directories(bsim_core PUBLIC include)
@@ -45,7 +46,11 @@ target_include_directories(bsim_render PUBLIC src)
 target_link_libraries(bsim_render PUBLIC bsim_core raylib)
 target_compile_options(bsim_render PRIVATE ${BSIM_WARNINGS})
 
-add_executable(bsim src/main.cpp)
+add_executable(bsim
+  src/main.cpp
+  src/scenes/plane_scene.cpp
+  src/scenes/spacecraft_scene.cpp
+)
 target_link_libraries(bsim PRIVATE bsim_render)
 target_compile_options(bsim PRIVATE ${BSIM_WARNINGS})
 
