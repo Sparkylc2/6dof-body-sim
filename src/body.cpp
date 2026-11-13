@@ -123,13 +123,18 @@ void FixedWing::read_keyboard(double dt) {
 }
 
 Wrench FixedWing::wrench(const AircraftState &x, const AirState &air) const {
+    return wrench(x, air, controls);
+}
+
+Wrench FixedWing::wrench(const AircraftState &x, const AirState &air,
+                         const FixedWingControls &u) const {
 
     const AirData air_info = air_data(x.vel(), x.quat(), air);
 
     Wrench w = gravity(m, x.quat());
-    w += longitudinal_aero(params, air_info, x.rates().y(), controls.de);
-    w += lateral_aero(params, air_info, x.rates(), controls.da, controls.dr);
-    w += propulsion(params, air_info, controls.dt);
+    w += longitudinal_aero(params, air_info, x.rates().y(), u.de);
+    w += lateral_aero(params, air_info, x.rates(), u.da, u.dr);
+    w += propulsion(params, air_info, u.dt);
     return w;
 }
 

@@ -25,6 +25,7 @@ add_library(bsim_core STATIC
   src/force_models/fixed_wing_model.cpp
   src/force_models/spacecraft_model.cpp
   src/body.cpp
+  src/trim.cpp
   src/spacecraft.cpp
   src/body_system.cpp
   src/air_system.cpp
@@ -50,6 +51,7 @@ add_executable(bsim
   src/main.cpp
   src/scenes/plane_scene.cpp
   src/scenes/spacecraft_scene.cpp
+  src/scenes/sindy_scene.cpp
 )
 target_link_libraries(bsim PRIVATE bsim_render)
 target_compile_options(bsim PRIVATE ${BSIM_WARNINGS})

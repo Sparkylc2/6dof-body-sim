@@ -12,4 +12,8 @@ void run_plane_scene();
 // axis at a random direction
 void run_spacecraft_scene();
 
+// initially just runs the different trajectories to develop the
+// SINDy model on phugoid data
+void run_sindy_scene();
+
 } // namespace BSIM::scenes

@@ -73,7 +73,11 @@ struct FixedWing : Body {
     // up/down arrows throttle
     void read_keyboard(double dt);
 
+    // uses the current controls
     Wrench wrench(const AircraftState &x, const AirState &air) const override;
+    // same force model but with any controls, so things like the trim solver can try out
+    // different deflections without touching the body
+    Wrench wrench(const AircraftState &x, const AirState &air, const FixedWingControls &u) const;
 };
 
 // --- factory methods ---

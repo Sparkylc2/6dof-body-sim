@@ -8,6 +8,7 @@
 #include "render/render.hpp"
 #include "scenes/scenes.hpp"
 #include "sensors.hpp" // wrap_angle
+#include "trim.hpp"
 #include "world.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
@@ -20,7 +21,7 @@ void run_plane_scene() {
     bool first_person = false;
 
     BSIM::rendering::init_camera({-10.0, -6.0, -6.0}, {0, 0, 0}, {0, 0, -1}, 45.0);
-    Mesh mesh = GenMeshCube(1.4224f, 0.05f, 0.3302f);
+    Mesh mesh = GenMeshCube(1.4f, 0.05f, 0.3f);
     Mesh mesh_fin = GenMeshCube(0.02f, 0.15f, 0.2f);
 
     Model model = LoadModelFromMesh(mesh);
@@ -33,18 +34,16 @@ void run_plane_scene() {
     BSIM::FixedWing &body = *plane;
     world.bodies.bodies.push_back(std::move(plane));
 
-    // level flight trim at 20 m/s, found numerically by solving fx = fz = m = 0 with theta = alpha
-    // (for the zagi it was Va 18, alpha 0.071940, trim {-0.197314, 0, 0, 0.783290})
-    const double Va_trim = 18, alpha_trim = 0.071940;
-    body.trim = {-0.00, 0, 0, 0.783290};
+    // level flight trim at 18 m/s
+    const double Va_trim = 18;
+    const BSIM::LongitudinalTrim trim = BSIM::trim_longitudinal(body, Va_trim);
+    if (!trim.converged) {
+        TraceLog(LOG_WARNING, "trim didn't converge, residual %g", trim.residual);
+    }
+    body.trim = trim.controls;
 
-    // starts 20 m up, flying north in trimmed level flight
-    auto start = [&body, Va_trim, alpha_trim]() {
-        body.state = BSIM::AircraftState();
-        body.state.pos() = Vector3d(0.0, 0.0, -20.0);
-        body.state.quat() = euler_to_quat(0.0, alpha_trim, 0.0);
-        body.state.vel() =
-            Vector3d(Va_trim * std::cos(alpha_trim), 0.0, Va_trim * std::sin(alpha_trim));
+    auto start = [&body, &trim]() {
+        body.state = trim.state(Vector3d(0.0, 0.0, -20.0));
         body.controls = body.trim;
     };
 
