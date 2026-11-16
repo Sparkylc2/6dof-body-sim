@@ -1,5 +1,5 @@
 #pragma once
-#include "control.hpp"
+#include "control/blocks.hpp"
 #include "force_models/spacecraft_model.hpp"
 #include <array>
 

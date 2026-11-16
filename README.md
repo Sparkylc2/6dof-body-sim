@@ -5,9 +5,9 @@ The notes attached show my own working while looking at the text book, and funct
 
 ### Notes index (`six dof sim.pdf`)
 - Frames & rotations (Ch 2) - p2
-- Kinematics & rigid-body dynamics (Ch 3) - p3
+- Kinematics & rigid-body dynamics (Ch 3) - p3 (and flight dynamics notes, first half)
 - Quaternion dynamics - p4
-- Forces & moments, wind/turbulence (Ch 4) - p5
+- Forces & moments, wind/turbulence (Ch 4) - p5 (and flight dynamics notes, second half, just force & moments, alongside linearisation)
 - Sensor models (Ch 7) - p6 – p7
 - Basic PID control - p7
 - Spacecraft model (orbit, J2, gravity gradient, reaction wheels, thrusters) - p8

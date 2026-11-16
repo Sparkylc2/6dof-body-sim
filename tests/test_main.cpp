@@ -1,15 +1,20 @@
-#include "autopilots/autopilot.hpp"
 #include "body.hpp"
 #include "body_system.hpp"
-#include "control.hpp"
+#include "control/autopilots/autopilot.hpp"
+#include "control/blocks.hpp"
+#include "control/scvx/scvx.hpp"
+#include "control/solvers/conic.hpp"
+#include "control/solvers/problem_builder.hpp"
 #include "force_models/fixed_wing_model.hpp"
 #include "frames.hpp"
 #include "sensors.hpp"
 #include "spacecraft.hpp"
 #include "world.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <random>
@@ -1008,6 +1013,344 @@ static void test_cubesat_full_orbit() {
                20.0e3); // J2 would make the radius wobble a lil
 }
 
+// --- solvers ---
+// min 1/2 |z|^2 - z1 - z2 with z1 - z2 = 0.2 and z1 + z2 <= 1, answer (0.6, 0.4)
+// a plain qp through clarabel, as one zero cone row and one nonnegative row
+static void test_conic_qp() {
+    using namespace BSIM::Solvers;
+    ConicProblem p;
+    p.P = Eigen::MatrixXd::Identity(2, 2).sparseView();
+    p.q = Eigen::Vector2d(-1.0, -1.0);
+    Eigen::MatrixXd A(2, 2);
+    A << 1, -1, 1, 1;
+    p.A = A.sparseView();
+    p.b = Eigen::Vector2d(0.2, 1.0);
+    p.n_eq = 1;
+    p.n_ineq = 1;
+
+    const ConicResult r = solve_conic(p);
+    CHECK(r.status == ConicStatus::Solved);
+    CHECK_NEAR(r.x(0), 0.6, 1e-7);
+    CHECK_NEAR(r.x(1), 0.4, 1e-7);
+    // stationarity: x + q + A' y = 0 -> y = (-0.1, 0.5)
+    // the inequality is active so its multiplier is positive (an equality's can be either sign)
+    CHECK_NEAR(r.y(0), -0.1, 1e-6);
+    CHECK_NEAR(r.y(1), 0.5, 1e-6);
+}
+
+// max z1 + z2 inside the unit circle -> (1, 1)/sqrt2, needs the second order cone
+static void test_conic_second_order_cone() {
+    using namespace BSIM::Solvers;
+    ConicProblem p;
+    p.P.resize(2, 2); // no quadratic term, it's an socp
+    p.q = Eigen::Vector2d(-1.0, -1.0);
+    Eigen::MatrixXd A = Eigen::MatrixXd::Zero(3, 2);
+    A.bottomRows(2) = -Eigen::MatrixXd::Identity(2, 2); // b - A z = (1, z1, z2)
+    p.A = A.sparseView();
+    p.b = Eigen::Vector3d(1.0, 0.0, 0.0);
+    p.soc = {3};
+
+    const ConicResult r = solve_conic(p);
+    CHECK(r.status == ConicStatus::Solved);
+    CHECK_NEAR(r.x(0), 1.0 / std::sqrt(2.0), 1e-7);
+    CHECK_NEAR(r.x(1), 1.0 / std::sqrt(2.0), 1e-7);
+}
+
+// the same qp as test_conic_qp, but written with the problem builder
+static void test_problem_builder_qp() {
+    using namespace BSIM::Solvers;
+    ProblemBuilder pb;
+    const Var z = pb.add_var(2);
+    pb.add_quadratic(z, Eigen::MatrixXd::Identity(2, 2), Eigen::Vector2d(1.0, 1.0)); // |z - 1|^2
+    pb.add_eq({{Eigen::RowVector2d(1, -1), z}}, Eigen::VectorXd::Constant(1, 0.2));
+    pb.add_le({{Eigen::RowVector2d(1, 1), z}}, Eigen::VectorXd::Constant(1, 1.0));
+
+    const ConicResult r = pb.solve();
+    CHECK(r.ok());
+    CHECK_NEAR(pb.value(r, z)(0), 0.6, 1e-7);
+    CHECK_NEAR(pb.value(r, z)(1), 0.4, 1e-7);
+}
+
+// --- scvx (once again unfortunately ai generated, got labs rn -.-)---
+// the worked example: 2d point mass with quadratic drag, min effort, round obstacle
+// xi = [rx ry vx vy], u = [ax ay]
+struct DragPointMass : BSIM::SCvx::OCP {
+    double cd = 0.05;
+    Eigen::Vector2d c{0.0, -0.4}; // obstacle centre
+    double R = 2.0, delta = 0.05;
+
+    DragPointMass() {
+        n_xi = 4;
+        n_u = 2;
+    }
+
+    // F = (v, u - cd |v| v)
+    Eigen::VectorXd F(double /*t*/, const Eigen::VectorXd &xi,
+                      const Eigen::VectorXd &u) const override {
+        const Eigen::Vector2d v = xi.tail<2>();
+        Eigen::VectorXd out(4);
+        out << v, u - cd * v.norm() * v;
+        return out;
+    }
+    BSIM::SCvx::Jacobians F_jac(double /*t*/, const Eigen::VectorXd &xi,
+                                const Eigen::VectorXd & /*u*/) const override {
+        const Eigen::Vector2d v = xi.tail<2>();
+        const double speed = v.norm();
+        BSIM::SCvx::Jacobians J{Eigen::MatrixXd::Zero(4, 4), Eigen::MatrixXd::Zero(4, 2)};
+        J.dx.topRightCorner(2, 2).setIdentity(); // r' = v
+        if (speed > 1e-12) {                     // dv'/dv = -cd (|v| I + v v' / |v|)
+            J.dx.bottomRightCorner(2, 2) =
+                -cd * (speed * Eigen::Matrix2d::Identity() + v * v.transpose() / speed);
+        }
+        J.du.bottomRows(2).setIdentity(); // dv'/du = I
+        return J;
+    }
+
+    // L = |u|^2
+    double L(double /*t*/, const Eigen::VectorXd & /*xi*/,
+             const Eigen::VectorXd &u) const override {
+        return u.squaredNorm();
+    }
+    BSIM::SCvx::Jacobians L_jac(double /*t*/, const Eigen::VectorXd & /*xi*/,
+                                const Eigen::VectorXd &u) const override {
+        return {Eigen::MatrixXd::Zero(1, 4), 2.0 * u.transpose()};
+    }
+
+    // g = R + delta - |r - c| <= 0
+    Eigen::VectorXd g(double /*t*/, const Eigen::VectorXd &xi,
+                      const Eigen::VectorXd & /*u*/) const override {
+        return Eigen::VectorXd::Constant(1, R + delta - (xi.head<2>() - c).norm());
+    }
+    BSIM::SCvx::Jacobians g_jac(double /*t*/, const Eigen::VectorXd &xi,
+                                const Eigen::VectorXd & /*u*/) const override {
+        const Eigen::Vector2d d = xi.head<2>() - c;
+        BSIM::SCvx::Jacobians J{Eigen::MatrixXd::Zero(1, 4), Eigen::MatrixXd::Zero(1, 2)};
+        J.dx.leftCols(2) = -d.transpose() / d.norm();
+        return J;
+    }
+};
+
+// no obstacle, but r has to stay on the curve r_y = a sin(k (r_x + 5)), to check h
+struct PathFollow : DragPointMass {
+    double a = 1.0;
+    double k = std::numbers::pi / 10.0;
+
+    Eigen::VectorXd g(double /*t*/, const Eigen::VectorXd & /*xi*/,
+                      const Eigen::VectorXd & /*u*/) const override {
+        return Eigen::VectorXd(0);
+    }
+    BSIM::SCvx::Jacobians g_jac(double /*t*/, const Eigen::VectorXd & /*xi*/,
+                                const Eigen::VectorXd & /*u*/) const override {
+        return {Eigen::MatrixXd(0, 4), Eigen::MatrixXd(0, 2)};
+    }
+
+    // h = r_y - a sin(k (r_x + 5)) == 0
+    Eigen::VectorXd h(double /*t*/, const Eigen::VectorXd &xi,
+                      const Eigen::VectorXd & /*u*/) const override {
+        return Eigen::VectorXd::Constant(1, xi(1) - a * std::sin(k * (xi(0) + 5.0)));
+    }
+    BSIM::SCvx::Jacobians h_jac(double /*t*/, const Eigen::VectorXd &xi,
+                                const Eigen::VectorXd & /*u*/) const override {
+        BSIM::SCvx::Jacobians J{Eigen::MatrixXd::Zero(1, 4), Eigen::MatrixXd::Zero(1, 2)};
+        J.dx(0, 0) = -a * k * std::cos(k * (xi(0) + 5.0));
+        J.dx(0, 1) = 1.0;
+        return J;
+    }
+};
+
+// tracking a moving reference (paper section 4), with a little effort cost, for the nmpc
+struct Tracking : DragPointMass {
+    double w_u = 0.01;
+    Eigen::Vector2d ref(double t) const {
+        return t < 6.0 ? Eigen::Vector2d(-5.0 + 10.0 * t / 6.0, 0.0) : Eigen::Vector2d(5.0, 0.0);
+    }
+    double L(double t, const Eigen::VectorXd &xi, const Eigen::VectorXd &u) const override {
+        return (xi.head<2>() - ref(t)).squaredNorm() + w_u * u.squaredNorm();
+    }
+    BSIM::SCvx::Jacobians L_jac(double t, const Eigen::VectorXd &xi,
+                                const Eigen::VectorXd &u) const override {
+        BSIM::SCvx::Jacobians J{Eigen::MatrixXd::Zero(1, 4), 2.0 * w_u * u.transpose()};
+        J.dx.leftCols(2) = 2.0 * (xi.head<2>() - ref(t)).transpose();
+        return J;
+    }
+};
+
+// settings and straight line guess from the worked example (rest -> 10/6 m/s -> rest, no control)
+static BSIM::SCvx::Settings worked_example_settings() {
+    BSIM::SCvx::Settings s;
+    s.u_norm_max = 5.0;
+    s.xi_h = Eigen::VectorXd::Zero(4);
+    s.xi_h << 5, 0, 0, 0;
+    s.fix_terminal = {0, 1, 2, 3};
+    s.substeps = 200;
+    return s;
+}
+
+static BSIM::SCvx::Trajectory straight_line_guess(int N) {
+    BSIM::SCvx::Trajectory Z;
+    for (int k = 0; k < N; k++) {
+        Eigen::VectorXd x = Eigen::VectorXd::Zero(6);
+        x(0) = -5.0 + 10.0 * k / (N - 1);
+        x(2) = (k == 0 || k == N - 1) ? 0.0 : 10.0 / 6.0;
+        Z.x.push_back(x);
+        Z.u.push_back(Eigen::VectorXd::Zero(2));
+    }
+    return Z;
+}
+
+// f_jac against central finite differences of f, with both g and h switched on
+static void test_scvx_f_jac_matches_finite_differences() {
+    using namespace BSIM::SCvx;
+    struct Both : PathFollow {
+        Eigen::VectorXd g(double t, const Eigen::VectorXd &xi,
+                          const Eigen::VectorXd &u) const override {
+            return DragPointMass::g(t, xi, u);
+        }
+        Jacobians g_jac(double t, const Eigen::VectorXd &xi,
+                        const Eigen::VectorXd &u) const override {
+            return DragPointMass::g_jac(t, xi, u);
+        }
+    } p;
+    Eigen::VectorXd x(6), u(2);
+    x << -1.0, 0.2, 1.3, -0.4, 0.0, 0.0; // inside the obstacle so g is active
+    u << 0.3, -0.8;
+    const Jacobians J = f_jac(p, 0.0, x, u);
+    const double e = 1e-6;
+    for (int i = 0; i < 6; i++) {
+        const Eigen::VectorXd d = Eigen::VectorXd::Unit(6, i) * e;
+        const Eigen::VectorXd fd = (f(p, 0.0, x + d, u) - f(p, 0.0, x - d, u)) / (2 * e);
+        CHECK((fd - J.dx.col(i)).cwiseAbs().maxCoeff() < 1e-6);
+    }
+    for (int i = 0; i < 2; i++) {
+        const Eigen::VectorXd d = Eigen::VectorXd::Unit(2, i) * e;
+        const Eigen::VectorXd fd = (f(p, 0.0, x, u + d) - f(p, 0.0, x, u - d)) / (2 * e);
+        CHECK((fd - J.du.col(i)).cwiseAbs().maxCoeff() < 1e-6);
+    }
+}
+
+// the worked example page: defects 8.43 7.41 9.89 3.56 for the first iterations, effort 8.16,
+// and the obstacle is cleared everywhere (not just at the nodes)
+static void test_scvx_worked_example() {
+    using namespace BSIM::SCvx;
+    DragPointMass p;
+    const Settings s = worked_example_settings();
+    const Trajectory guess = straight_line_guess(s.N);
+    const Result r = solve(p, s, 0.0, guess.x[0].head(4), guess);
+
+    CHECK(r.history.size() >= 4);
+    CHECK_NEAR(r.history[0].defect, 8.4292, 1e-3);
+    CHECK_NEAR(r.history[1].defect, 7.4075, 1e-3);
+    CHECK_NEAR(r.history[2].defect, 9.8874, 1e-3);
+    CHECK_NEAR(r.history[3].defect, 3.5625, 1e-3);
+    CHECK_NEAR(r.Z.x.back()(il(p)), 8.1568, 1e-3); // l_N, the effort
+    CHECK(r.defect < 1e-5);                        // the plan obeys the real dynamics
+    CHECK((r.Z.x.back().head(4) - s.xi_h).norm() < 1e-6);
+
+    // fly the plan finely and check the clearance in between the nodes
+    Eigen::VectorXd x = r.Z.x[0];
+    double worst = 1e9;
+    const int n = 3000;
+    const double h = s.t_h / n;
+    for (int i = 0; i < n; i++) {
+        const double t = i * h;
+        auto rate = [&](double tt, const Eigen::VectorXd &xx) {
+            return f(p, tt, xx, control_at(r.Z, 0.0, s.dt(), tt));
+        };
+        const Eigen::VectorXd k1 = rate(t, x), k2 = rate(t + h / 2, x + h / 2 * k1),
+                              k3 = rate(t + h / 2, x + h / 2 * k2), k4 = rate(t + h, x + h * k3);
+        x += h / 6 * (k1 + 2 * k2 + 2 * k3 + k4);
+        worst = std::min(worst, (x.head<2>() - p.c).norm() - p.R);
+    }
+    CHECK(worst > 0.0);
+    std::printf("scvx worked example: %zu iterations, effort %.4f, worst clearance %+.1f cm\n",
+                r.history.size(), r.Z.x.back()(il(p)), 100 * worst);
+}
+
+// h == 0 path constraint: starting off the curve, the plan ends up following it
+static void test_scvx_path_following_h() {
+    using namespace BSIM::SCvx;
+    PathFollow p;
+    const Settings s = worked_example_settings();
+    const Trajectory guess = straight_line_guess(s.N);
+    const Result r = solve(p, s, 0.0, guess.x[0].head(4), guess);
+
+    CHECK(r.defect < 1e-5);
+    // y_N is the integral of h^2, (16c) lets it grow by at most eps per sub-interval
+    CHECK(r.Z.x.back()(iy(p)) <= (s.N - 1) * s.eps + 1e-9);
+
+    Eigen::VectorXd x = r.Z.x[0];
+    double worst_h = 0.0;
+    const int n = 3000;
+    const double h = s.t_h / n;
+    for (int i = 0; i < n; i++) {
+        const double t = i * h;
+        auto rate = [&](double tt, const Eigen::VectorXd &xx) {
+            return f(p, tt, xx, control_at(r.Z, 0.0, s.dt(), tt));
+        };
+        const Eigen::VectorXd k1 = rate(t, x), k2 = rate(t + h / 2, x + h / 2 * k1),
+                              k3 = rate(t + h / 2, x + h / 2 * k2), k4 = rate(t + h, x + h * k3);
+        x += h / 6 * (k1 + 2 * k2 + 2 * k3 + k4);
+        worst_h = std::max(worst_h, std::abs(p.h(t + h, x.head(4), Eigen::VectorXd::Zero(2))(0)));
+    }
+    CHECK(worst_h < 0.03);
+    std::printf("scvx path following: worst |h| between nodes %.3f m\n", worst_h);
+}
+
+// algorithm 1: the model thinks cd = 0.05 but the real plant has cd = 0.2.
+// replanning from the measured state every dt has to get it to (5, 0) round the obstacle anyway
+static void test_scvx_nmpc_with_model_error() {
+    using namespace BSIM::SCvx;
+    Tracking model, plant;
+    plant.cd = 0.2;
+    Settings s;
+    s.t_h = 3.0;
+    s.u_norm_max = 5.0;
+    const int K = 1;
+    const double dt_mpc = K * s.dt();
+
+    Eigen::VectorXd xi(4);
+    xi << -5, 0, 0, 0;
+    Trajectory Z;
+    for (int k = 0; k < s.N; k++) {
+        Eigen::VectorXd x = Eigen::VectorXd::Zero(6);
+        x.head(4) = xi;
+        Z.x.push_back(x);
+        Z.u.push_back(Eigen::VectorXd::Zero(2));
+    }
+
+    double worst = 1e9;
+    for (double tc = 0.0; tc <= 10.0 + 1e-9; tc += dt_mpc) {
+        s.j_max = tc == 0.0 ? 40 : 10; // converge properly the first time, then warm started
+        const Result res = solve(model, s, tc, xi, Z);
+        CHECK(res.history.back().status == BSIM::Solvers::ConicStatus::Solved ||
+              res.history.back().status == BSIM::Solvers::ConicStatus::AlmostSolved);
+
+        // apply the plan to the real plant for dt_mpc
+        Eigen::VectorXd x = Eigen::VectorXd::Zero(6);
+        x.head(4) = xi;
+        const int n = 50;
+        const double h = dt_mpc / n;
+        for (int i = 0; i < n; i++) {
+            const double t = tc + i * h;
+            auto rate = [&](double tt, const Eigen::VectorXd &xx) {
+                return f(plant, tt, xx, control_at(res.Z, tc, s.dt(), tt));
+            };
+            const Eigen::VectorXd k1 = rate(t, x), k2 = rate(t + h / 2, x + h / 2 * k1),
+                                  k3 = rate(t + h / 2, x + h / 2 * k2),
+                                  k4 = rate(t + h, x + h * k3);
+            x += h / 6 * (k1 + 2 * k2 + 2 * k3 + k4);
+            worst = std::min(worst, (x.head<2>() - plant.c).norm() - plant.R);
+        }
+        xi = x.head(4);
+        Z = warm_start(model, s, tc, res.Z, K);
+    }
+    CHECK(worst > 0.0);
+    CHECK((xi.head<2>() - Eigen::Vector2d(5, 0)).norm() < 0.05);
+    CHECK(xi.tail<2>().norm() < 0.05);
+    std::printf("scvx nmpc: worst clearance %+.1f cm, final position error %.3f m\n", 100 * worst,
+                (xi.head<2>() - Eigen::Vector2d(5, 0)).norm());
+}
+
 int main() {
     test_rotation_is_orthonormal();
     test_rotation_sign_conventions();
@@ -1058,6 +1401,13 @@ int main() {
     test_gravity_is_gradient_of_potential();
     test_circular_orbit();
     test_cubesat_full_orbit();
+    test_conic_qp();
+    test_conic_second_order_cone();
+    test_problem_builder_qp();
+    test_scvx_f_jac_matches_finite_differences();
+    test_scvx_worked_example();
+    test_scvx_path_following_h();
+    test_scvx_nmpc_with_model_error();
 
     std::printf("%d/%d passed\n (pray its all right xD)", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;

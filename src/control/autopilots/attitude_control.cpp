@@ -1,4 +1,4 @@
-#include "autopilots/attitude_control.hpp"
+#include "control/autopilots/attitude_control.hpp"
 #include "frames.hpp"
 #include <cmath>
 

@@ -1,6 +1,6 @@
 // src/scenes/plane_scene.cpp
-#include "autopilots/autopilot.hpp"
-#include "autopilots/lateral_autopilot.hpp"
+#include "control/autopilots/autopilot.hpp"
+#include "control/autopilots/lateral_autopilot.hpp"
 #include "body.hpp"
 #include "body_state.hpp"
 #include "body_system.hpp"
@@ -51,11 +51,11 @@ void run_plane_scene() {
 
     // lateral autopilot
     BSIM::LateralDesignParams lat;
-    lat.da_max = 45.0 * DEG;    // seems an appropriate angle
-    lat.e_phi_max = 30.0 * DEG; // same here
-    lat.zeta_phi = 0.9;         // this shoulld be well damped
+    lat.da_max = 20.0 * DEG;    // seems an appropriate angle
+    lat.e_phi_max = 80.0 * DEG; // same here
+    lat.zeta_phi = 1.4;         // this shoulld be well damped
     lat.ki_phi = 0.1;   // a small value should just trim steady-state and not destabilise anything
-    lat.W_chi = 5.0;    // textbook says this should be good
+    lat.W_chi = 12.0;   // textbook says this should be good
     lat.zeta_chi = 1.0; // larger is better since this gives more bandwidth/less overshoot
     lat.Vg = Va_trim;   // trim condition
     lat.phi_max = 30.0 * DEG;    // reasonable bank limit

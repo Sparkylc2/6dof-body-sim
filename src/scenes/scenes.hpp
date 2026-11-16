@@ -16,4 +16,8 @@ void run_spacecraft_scene();
 // SINDy model on phugoid data
 void run_sindy_scene();
 
+// scvx nmpc flying the sport drone round an L shaped course through randomly placed balls,
+// drawing the planned horizon as a line between the nodes
+void run_scvx_scene();
+
 } // namespace BSIM::scenes

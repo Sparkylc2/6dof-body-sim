@@ -1,5 +1,5 @@
 // src/scenes/spacecraft_scene.cpp
-#include "autopilots/attitude_control.hpp"
+#include "control/autopilots/attitude_control.hpp"
 #include "body_system.hpp"
 #include "frames.hpp"
 #include "render/render.hpp"

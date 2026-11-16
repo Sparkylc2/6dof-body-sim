@@ -1,6 +1,6 @@
 #pragma once
 #include "body_state.hpp"
-#include "control.hpp"
+#include "control/blocks.hpp"
 #include "force_models/fixed_wing_model.hpp"
 
 namespace BSIM {

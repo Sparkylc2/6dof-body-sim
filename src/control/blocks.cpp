@@ -1,4 +1,4 @@
-#include "control.hpp"
+#include "control/blocks.hpp"
 #include "sensors.hpp" // wrap_angle
 #include <algorithm>
 
