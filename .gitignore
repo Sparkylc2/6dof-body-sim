@@ -36,3 +36,10 @@ build/
 build-release/
 
 Small Unmanned Aircraft*.pdf
+
+# matlab bridge build output
+matlab/bin/
+# simulink build caches
+slprj/
+*.slxc
+*.autosave

@@ -59,18 +59,22 @@ add_library(bsim_models STATIC
   src/force_models.cpp
   src/force_models/fixed_wing_model.cpp
   src/force_models/spacecraft_model.cpp
+  src/force_models/rocket_model.cpp
   src/dynamics.cpp
-  src/body.cpp
+  src/craft.cpp
   src/actuators.cpp
   src/trim.cpp
-  src/spacecraft.cpp
   src/body_system.cpp
   src/air_system.cpp
   src/sensors.cpp
   src/world.cpp
+  src/tables.cpp
+  src/atmosphere.cpp
 )
 target_include_directories(bsim_models PUBLIC include)
 target_link_libraries(bsim_models PUBLIC Eigen3::Eigen)
+# the matlab bridge links this into a shared library and a mex
+set_target_properties(bsim_models PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_compile_options(bsim_models PRIVATE ${BSIM_WARNINGS})
 
 # --- control (autopilots, control blocks, the conic solver for scvx) ---
@@ -103,6 +107,12 @@ add_executable(bsim
 )
 target_link_libraries(bsim PRIVATE bsim_render)
 target_compile_options(bsim PRIVATE ${BSIM_WARNINGS})
+
+# --- matlab bridge (see matlab/bridge) ---
+option(BSIM_MATLAB "build the matlab bridge (mex and shared library into matlab/bin)" OFF)
+if(BSIM_MATLAB)
+  add_subdirectory(matlab/bridge)
+endif()
 
 enable_testing()
 add_executable(bsim_tests tests/test_main.cpp)
