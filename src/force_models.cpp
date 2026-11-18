@@ -32,6 +32,7 @@ AirData air_data(const Vector3d &vel_ground_b, const Vector4d &quat, const AirSt
     // same as asin(v_r / Va) when Va > 0, but this one is still defined (ie 0) at rest
     air_info.beta = std::atan2(v_r, std::sqrt(u_r * u_r + w_r * w_r));
     air_info.rho = air.rho;
+    air_info.a = air.a;
 
     return air_info;
 }

@@ -20,12 +20,15 @@ struct Wrench {
     }
 };
 
-// airspeed, angle of attack, sideslip and the density of the air the body is in
+// airspeed, angle of attack, sideslip and the density and speed of sound of the air the body is in
 struct AirData {
     double Va = 0.0;
     double alpha = 0.0;
     double beta = 0.0;
     double rho = RHO_DEFAULT;
+    double a = A_DEFAULT;
+
+    double mach() const { return Va / a; }
 };
 
 // air data from the body ground velocity [u, v, w], the attitude and the air around the body

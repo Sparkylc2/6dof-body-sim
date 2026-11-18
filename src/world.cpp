@@ -15,6 +15,7 @@ void World::step(double dt) {
 
         // update the bodies air state to match the current atmosphere
         b.air.rho = atmosphere.rho;       // for aircraft we'd prob add a function here using alt
+        b.air.a = atmosphere.a;           // (isa() in atmosphere.hpp gives both from altitude)
         b.air.wind_i = atmosphere.wind_i; // same here
         // gusts advance once per step and are then held through all the rk4 stages
         b.air.gust_b = atmosphere.turbulence && b.gust ? b.gust->step(Va, dt, atmosphere.rng)

@@ -7,11 +7,14 @@ using Eigen::Vector3d;
 
 // air density the book uses for all its aircraft (appendix E)
 constexpr double RHO_DEFAULT = 1.2682;
+// speed of sound at sea level (ISA, see atmosphere.hpp), only matters for mach dependent models
+constexpr double A_DEFAULT = 340.29399;
 
 // --- general atmosphere ---
 // what the air looks like to a body during one step
 struct AirState {
     double rho = RHO_DEFAULT;
+    double a = A_DEFAULT;               // speed of sound
     Vector3d wind_i = Vector3d::Zero(); // the steady wind, in inertial frame
     Vector3d gust_b = Vector3d::Zero(); // the turbulent wind, in body frame
 };
@@ -26,6 +29,7 @@ struct Gust {
 // the shared atmosphere environment
 struct AirSystem {
     double rho = RHO_DEFAULT;
+    double a = A_DEFAULT;               // speed of sound
     Vector3d wind_i = Vector3d::Zero(); // shared steady wind
     std::mt19937 rng{0};                // fixed for now
     bool turbulence = true;

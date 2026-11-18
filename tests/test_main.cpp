@@ -1,3 +1,4 @@
+#include "atmosphere.hpp"
 #include "body.hpp"
 #include "body_system.hpp"
 #include "control/autopilots/autopilot.hpp"
@@ -9,14 +10,20 @@
 #include "frames.hpp"
 #include "sensors.hpp"
 #include "spacecraft.hpp"
+#include "tables.hpp"
 #include "world.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <numbers>
 #include <random>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 // moving forward i'm having claude generate the tests, in the interest of time
 // however, i do go through the tests, and some of them are my own suggestions
@@ -1351,6 +1358,127 @@ static void test_scvx_nmpc_with_model_error() {
                 (xi.head<2>() - Eigen::Vector2d(5, 0)).norm());
 }
 
+// --- lookup tables ---
+// hits the values at the breakpoints, linear in between, and held flat past the ends
+static void test_lookup1() {
+    const std::vector<double> x{0.0, 1.0, 3.0}, y{2.0, 4.0, 0.0};
+    CHECK_NEAR(BSIM::lookup1(x, y, 0.0), 2.0, 1e-15);
+    CHECK_NEAR(BSIM::lookup1(x, y, 1.0), 4.0, 1e-15);
+    CHECK_NEAR(BSIM::lookup1(x, y, 3.0), 0.0, 1e-15);
+    CHECK_NEAR(BSIM::lookup1(x, y, 0.5), 3.0, 1e-15);
+    CHECK_NEAR(BSIM::lookup1(x, y, 2.0), 2.0, 1e-15);
+    CHECK_NEAR(BSIM::lookup1(x, y, -5.0), 2.0, 1e-15);
+    CHECK_NEAR(BSIM::lookup1(x, y, 10.0), 0.0, 1e-15);
+
+    // one breakpoint is just a constant
+    const std::vector<double> x1{1.0}, y1{7.0};
+    CHECK_NEAR(BSIM::lookup1(x1, y1, -3.0), 7.0, 1e-15);
+}
+
+// bilinear is exact on a plane, so z = 2x + 3y + 1 should come back everywhere inside,
+// and z is column major (z[i + nx*j] at (x[i], y[j]))
+static void test_lookup2() {
+    const std::vector<double> x{0.0, 1.0, 2.5}, y{-1.0, 0.0, 2.0, 3.0};
+    std::vector<double> z(x.size() * y.size());
+    for (std::size_t i = 0; i < x.size(); i++) {
+        for (std::size_t j = 0; j < y.size(); j++) {
+            z[i + x.size() * j] = 2.0 * x[i] + 3.0 * y[j] + 1.0;
+        }
+    }
+    const BSIM::Table2D t(x, y, z);
+    CHECK_NEAR(t(0.3, 1.7), 2.0 * 0.3 + 3.0 * 1.7 + 1.0, 1e-12);
+    CHECK_NEAR(t(2.0, -0.5), 2.0 * 2.0 + 3.0 * -0.5 + 1.0, 1e-12);
+    CHECK_NEAR(t(1.0, 2.0), 2.0 * 1.0 + 3.0 * 2.0 + 1.0, 1e-12);
+    // clamped in both directions past the corner
+    CHECK_NEAR(t(9.0, 9.0), 2.0 * 2.5 + 3.0 * 3.0 + 1.0, 1e-12);
+    CHECK_NEAR(t(-9.0, -9.0), 2.0 * 0.0 + 3.0 * -1.0 + 1.0, 1e-12);
+}
+
+static bool throws_invalid(const std::function<void()> &f) {
+    try {
+        f();
+    } catch (const std::invalid_argument &) {
+        return true;
+    }
+    return false;
+}
+
+static void test_tables_reject_bad_breakpoints() {
+    CHECK(throws_invalid([] { BSIM::Table1D({0.0, 0.0, 1.0}, {1.0, 2.0, 3.0}); }));
+    CHECK(throws_invalid([] { BSIM::Table1D({0.0, 1.0}, {1.0}); }));
+    CHECK(throws_invalid([] { BSIM::Table1D({}, {}); }));
+    CHECK(throws_invalid([] { BSIM::Table2D({0.0, 1.0}, {0.0, 1.0}, {1.0, 2.0, 3.0}); }));
+}
+
+// writes a csv with a header, a comment and a blank line and reads it back
+static void test_load_tables_from_csv() {
+    const std::string dir = std::filesystem::temp_directory_path().string();
+    const std::string p1 = dir + "/bsim_table1d_test.csv";
+    const std::string p2 = dir + "/bsim_table2d_test.csv";
+    {
+        std::ofstream f(p1);
+        f << "mach, cd\n# a comment\n0.0, 0.45\n\n0.8, 0.47\n1.2, 0.60\n";
+    }
+    {
+        std::ofstream f(p2);
+        f << "mach\\alpha, 0.0, 0.1\n0.0, 1.0, 2.0\n1.0, 3.0, 4.0\n2.0, 5.0, 6.0\n";
+    }
+
+    const BSIM::Table1D cd = BSIM::load_table1d(p1);
+    CHECK(cd.x.size() == 3);
+    CHECK_NEAR(cd(1.0), 0.535, 1e-12);
+
+    const BSIM::Table2D t = BSIM::load_table2d(p2);
+    CHECK(t.x.size() == 3 && t.y.size() == 2);
+    CHECK_NEAR(t(1.0, 0.1), 4.0, 1e-12);  // straight off a breakpoint
+    CHECK_NEAR(t(1.5, 0.05), 4.5, 1e-12); // middle of the bottom right square
+
+    std::filesystem::remove(p1);
+    std::filesystem::remove(p2);
+}
+
+// --- isa ---
+static void test_isa_sea_level() {
+    const BSIM::Atmosphere atm = BSIM::isa(0.0);
+    CHECK_NEAR(atm.T, 288.15, 1e-12);
+    CHECK_NEAR(atm.p, 101325.0, 1e-9);
+    CHECK_NEAR(atm.rho, 1.225, 1e-6);
+    CHECK_NEAR(atm.a, 340.294, 1e-3);
+}
+
+// against the 1976 us standard atmosphere tables (geometric altitude)
+static void test_isa_matches_standard_tables() {
+    const BSIM::Atmosphere a9 = BSIM::isa(9000.0);
+    CHECK_NEAR(a9.T, 229.733, 1e-3);
+    CHECK_NEAR(a9.p, 30800.0, 5.0);
+    CHECK_NEAR(a9.rho, 0.46706, 1e-4);
+    CHECK_NEAR(a9.a, 303.85, 0.01);
+
+    // tropopause (geopotential) and the layer bases
+    CHECK_NEAR(BSIM::isa_geopotential(11000.0).T, 216.65, 1e-9);
+    CHECK_NEAR(BSIM::isa_geopotential(11000.0).p, 22632.06, 0.05);
+    CHECK_NEAR(BSIM::isa_geopotential(20000.0).p, 5474.89, 0.05);
+    CHECK_NEAR(BSIM::isa_geopotential(32000.0).T, 228.65, 1e-9);
+}
+
+// no jumps at the layer boundaries, and density always falls going up
+static void test_isa_is_continuous() {
+    for (double H : {11000.0, 20000.0}) {
+        const BSIM::Atmosphere lo = BSIM::isa_geopotential(H - 1e-6);
+        const BSIM::Atmosphere hi = BSIM::isa_geopotential(H + 1e-6);
+        CHECK_NEAR(lo.T, hi.T, 1e-6);
+        CHECK_NEAR(lo.p, hi.p, 1e-4);
+    }
+    double rho_prev = BSIM::isa(-500.0).rho;
+    bool falling = true;
+    for (double h = 0.0; h <= 32000.0; h += 250.0) {
+        const double rho = BSIM::isa(h).rho;
+        falling = falling && rho < rho_prev;
+        rho_prev = rho;
+    }
+    CHECK(falling);
+}
+
 int main() {
     test_rotation_is_orthonormal();
     test_rotation_sign_conventions();
@@ -1408,6 +1536,13 @@ int main() {
     test_scvx_worked_example();
     test_scvx_path_following_h();
     test_scvx_nmpc_with_model_error();
+    test_lookup1();
+    test_lookup2();
+    test_tables_reject_bad_breakpoints();
+    test_load_tables_from_csv();
+    test_isa_sea_level();
+    test_isa_matches_standard_tables();
+    test_isa_is_continuous();
 
     std::printf("%d/%d passed\n (pray its all right xD)", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;
