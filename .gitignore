@@ -33,5 +33,6 @@
 
 # my build folder
 build/
+build-release/
 
 Small Unmanned Aircraft*.pdf

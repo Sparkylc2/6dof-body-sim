@@ -125,7 +125,7 @@ struct Ball {
 // constant ground speed V, so  n' = V cos chi,  e' = V sin chi,  chi' = r
 struct TurnRateOCP : SCvx::OCP {
     double V = 18.0;
-    double margin = 2.0;  // extra clearance round each ball (covers the tracking error too)
+    double margin = 3.0;  // extra clearance round each ball (covers the tracking error too)
     double w_path = 0.01; // pulls plan back onto course line
     double w_r = 5.0;     // keeps the turns gentle
     const Course *course = nullptr;
@@ -209,6 +209,23 @@ double plan_rate(const SCvx::Trajectory &Z, double t_plan, double dt, double t) 
     return SCvx::control_at(Z, t_plan, dt, t)(0);
 }
 
+// where the plan says the plane should be at time t (integrates the course from the node before)
+Vector2d plan_position(const SCvx::Trajectory &Z, double t_plan, double dt, double V, double t) {
+    const int N = static_cast<int>(Z.x.size());
+    const double s = std::clamp((t - t_plan) / dt, 0.0, static_cast<double>(N - 1));
+    const int k = std::min(static_cast<int>(s), N - 2);
+    const double tk = t_plan + k * dt;
+
+    const int steps = 8;
+    const double h = (t_plan + s * dt - tk) / steps;
+    Vector2d p = Z.x[static_cast<size_t>(k)].head<2>();
+    for (int i = 0; i < steps; i++) {
+        const double chi = plan_course(Z, t_plan, dt, tk + (i + 0.5) * h);
+        p += V * h * Vector2d(std::cos(chi), std::sin(chi));
+    }
+    return p;
+}
+
 struct Mission {
     // flight
     double Va = 18.0;  // airspeed
@@ -228,6 +245,11 @@ struct Mission {
     TurnRateOCP ocp;
     SCvx::Settings s;
     double lead = 0.3; // how far ahead on the plan the commands are taken from (roll lag) [s]
+
+    // pulls the plane back onto the plan's position between replans
+    // chi_c = chi_plan - chi_inf (2 / pi) atan(k_ct e_y), e_y is how far right of the plan it is
+    double k_ct = 0.15;
+    double chi_inf = 30.0 * DEG;
 
     SCvx::Trajectory Z; // the current plan
     SCvx::Result last;  // the last solve
@@ -446,7 +468,13 @@ struct Mission {
         //
         if (lat_ap.clock.ready(t)) {
             const double Ts = lat_ap.clock.Ts;
-            const double chi_c = wrap_angle(plan_course(Z, t_plan, s.dt(), t + lead));
+            const double chi_ref = plan_course(Z, t_plan, s.dt(), t);
+            const Vector2d p_ref = plan_position(Z, t_plan, s.dt(), ocp.V, t);
+            const Vector2d right(-std::sin(chi_ref), std::cos(chi_ref));
+            const double e_y = (Vector2d(cs.pn, cs.pe) - p_ref).dot(right);
+            const double chi_c =
+                wrap_angle(plan_course(Z, t_plan, s.dt(), t + lead) -
+                           chi_inf * 2.0 / std::numbers::pi * std::atan(k_ct * e_y));
             const double phi_ff = std::atan(Va * plan_rate(Z, t_plan, s.dt(), t + lead) / 9.81);
 
             lat_ap.phi_c = lat_ap.course.pid.update(chi_c, cs.chi, Ts, phi_ff);

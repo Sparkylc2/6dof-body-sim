@@ -58,6 +58,7 @@ add_library(bsim_core STATIC
   src/force_models/fixed_wing_model.cpp
   src/force_models/spacecraft_model.cpp
   src/body.cpp
+  src/actuators.cpp
   src/trim.cpp
   src/spacecraft.cpp
   src/body_system.cpp
@@ -92,6 +93,11 @@ add_executable(bsim
 )
 target_link_libraries(bsim PRIVATE bsim_render)
 target_compile_options(bsim PRIVATE ${BSIM_WARNINGS})
+
+# headless experiment, hold order vs actuator dynamics (writes csvs for plotting)
+add_executable(bsim_soh_experiment experiments/soh_actuator.cpp)
+target_link_libraries(bsim_soh_experiment PRIVATE bsim_core)
+target_compile_options(bsim_soh_experiment PRIVATE ${BSIM_WARNINGS})
 
 enable_testing()
 add_executable(bsim_tests tests/test_main.cpp)

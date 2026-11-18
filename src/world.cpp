@@ -21,6 +21,11 @@ void World::step(double dt) {
                                                        : Vector3d::Zero();
     }
 
+    // the actuators move over the step and are then held through all the rk4 stages (like the gusts)
+    for (auto &bp : bodies.bodies) {
+        bp->step_actuators(dt);
+    }
+
     bodies.step(dt);
     t += dt;
 

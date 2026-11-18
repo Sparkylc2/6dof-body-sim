@@ -123,7 +123,18 @@ void FixedWing::read_keyboard(double dt) {
 }
 
 Wrench FixedWing::wrench(const AircraftState &x, const AirState &air) const {
-    return wrench(x, air, controls);
+    if (aileron.ideal()) {
+        return wrench(x, air, controls);
+    }
+    FixedWingControls u = controls;
+    u.da = aileron.pos;
+    return wrench(x, air, u);
+}
+
+void FixedWing::step_actuators(double dt) {
+    if (!aileron.ideal()) {
+        aileron.step(controls.da, dt);
+    }
 }
 
 Wrench FixedWing::wrench(const AircraftState &x, const AirState &air,

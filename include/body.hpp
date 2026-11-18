@@ -2,6 +2,7 @@
 #include <Eigen/Dense>
 #include <memory>
 
+#include "actuators.hpp"
 #include "air_system.hpp"
 #include "body_state.hpp"
 #include "force_models.hpp"
@@ -33,6 +34,10 @@ struct Body {
 
     // this gets overwritten by subclasses to implement different craft and their specific forces
     virtual Wrench wrench(const AircraftState &x, const AirState &air) const = 0;
+
+    // moves any actuators towards their commands, the World calls it before the physics step
+    // (nothing by default, so bodies without actuator models act on their inputs instantly)
+    virtual void step_actuators(double /*dt*/) {}
 
     // the gust pointer makes bodies move only, and declaring the destructor would otherwise stop
     // the moves being generated
@@ -67,14 +72,20 @@ struct FixedWing : Body {
     FixedWingControls controls; // control derivatives
     FixedWingControls trim;     // static control values for trim (can equally be 0)
 
+    // the aileron servo, controls.da is then the command and aileron.pos is what the aero sees
+    // (ideal by default, which is the same as having no actuator)
+    Actuator aileron;
+
     FixedWing(double m, const Vector4d &J, const FixedWingParams &params);
 
     // w/s elevator (nose down/up), a/d aileron (roll left/right), q/e rudder (yaw left/right),
     // up/down arrows throttle
     void read_keyboard(double dt);
 
-    // uses the current controls
+    // uses the current controls (with the aileron where its actuator has got to)
     Wrench wrench(const AircraftState &x, const AirState &air) const override;
+
+    void step_actuators(double dt) override;
     // same force model but with any controls, so things like the trim solver can try out
     // different deflections without touching the body
     Wrench wrench(const AircraftState &x, const AirState &air, const FixedWingControls &u) const;
