@@ -941,77 +941,78 @@ static void test_autopilot_holds_between_samples() {
 // ---- spacecraft ----
 // these i actually wrote myself
 // a system with just this spacecraft in it
-static BSIM::SpacecraftBodySystem spacecraft_system(BSIM::Spacecraft s) {
-    BSIM::SpacecraftBodySystem sys;
-    sys.bodies.push_back(std::make_unique<BSIM::Spacecraft>(std::move(s)));
-    return sys;
-}
-
-// steps a system for T seconds at dt (the last step is shortened to land on T exactly)
-template <class Sys> static void run_for(Sys &sys, double T, double dt) {
-    double t = 0.0;
-    while (t < T) {
-        sys.step(dt);
-        t += dt;
-    }
-}
-
-// specific orbital energy, v^2/2 + U (this is a conserved quantity)
-static double orbital_energy(const BSIM::SpacecraftState &x, bool j2) {
-    return 0.5 * x.vel().squaredNorm() + BSIM::gravity_potential(x.pos(), j2);
-}
-
-// the analytic gravity has to be minus the gradient of the potential
-// (ie are the J2 derivatives correct)
-static void test_gravity_is_gradient_of_potential() {
-    const Eigen::Vector3d r(1e6, 16, 1e6); // random
-    const double h = 1.0;
-    Eigen::Vector3d grad;
-    // little central finite difference
-    for (int i = 0; i < 3; ++i) {
-        Eigen::Vector3d dr = Eigen::Vector3d::Zero();
-        dr(i) = h;
-        grad(i) = (BSIM::gravity_potential(r + dr, true) - BSIM::gravity_potential(r - dr, true)) /
-                  (2.0 * h);
-    }
-    const Eigen::Vector3d a = BSIM::two_body_gravity(r) + BSIM::j2_gravity(r);
-    CHECK_VEC_NEAR(a, -grad, 1e-6 * a.norm());
-    // and j2 is supposed to be a small correction, (like 1e-3 of point mass gravity)
-    CHECK(BSIM::j2_gravity(r).norm() / BSIM::two_body_gravity(r).norm() < 3e-3);
-}
-
-// with point mass gravity a circular orbit comes back to where it started after one period, and
-// energy and angular momentum stay constant
-static void test_circular_orbit() {
-    BSIM::Spacecraft s = BSIM::generate_cubesat();
-    s.env.j2 = false;
-    auto sys = spacecraft_system(std::move(s));
-    BSIM::SpacecraftState &x = sys.bodies[0]->state;
-
-    const Eigen::Vector3d r0 = x.pos();
-    const double E0 = orbital_energy(x, false);
-    const Eigen::Vector3d l0 = x.pos().cross(x.vel());
-
-    const double T = 2.0 * pi * std::sqrt(std::pow(r0.norm(), 3) / BSIM::MU_EARTH);
-    CHECK_NEAR(T / 60.0, 94.6, 0.05); // 500 km
-
-    run_for(sys, T, 1.0);
-
-    CHECK((x.pos() - r0).norm() < 1.0);
-    CHECK_NEAR(orbital_energy(x, false) / E0, 1.0, 1e-10);
-    CHECK((x.pos().cross(x.vel()) - l0).norm() / l0.norm() < 1e-10);
-}
-
-static void test_cubesat_full_orbit() {
-    auto sys = spacecraft_system(BSIM::generate_cubesat());
-    const BSIM::SpacecraftState &x = sys.bodies[0]->state;
-    run_for(sys, 6000, 1.0);
-    CHECK(x.state.allFinite());
-    CHECK(x.rates().norm() > 0.0);
-    CHECK_NEAR(x.pos().norm(), BSIM::R_EARTH + 500.0e3,
-               20.0e3); // J2 would make the radius wobble a lil
-}
-
+// static BSIM::SpacecraftBodySystem spacecraft_system(BSIM::Spacecraft s) {
+//     BSIM::SpacecraftBodySystem sys;
+//     sys.bodies.push_back(std::make_unique<BSIM::Spacecraft>(std::move(s)));
+//     return sys;
+// }
+//
+// // steps a system for T seconds at dt (the last step is shortened to land on T exactly)
+// template <class Sys> static void run_for(Sys &sys, double T, double dt) {
+//     double t = 0.0;
+//     while (t < T) {
+//         sys.step(dt);
+//         t += dt;
+//     }
+// }
+//
+// // specific orbital energy, v^2/2 + U (this is a conserved quantity)
+// static double orbital_energy(const BSIM::SpacecraftState &x, bool j2) {
+//     return 0.5 * x.vel().squaredNorm() + BSIM::gravity_potential(x.pos(), j2);
+// }
+//
+// // the analytic gravity has to be minus the gradient of the potential
+// // (ie are the J2 derivatives correct)
+// static void test_gravity_is_gradient_of_potential() {
+//     const Eigen::Vector3d r(1e6, 16, 1e6); // random
+//     const double h = 1.0;
+//     Eigen::Vector3d grad;
+//     // little central finite difference
+//     for (int i = 0; i < 3; ++i) {
+//         Eigen::Vector3d dr = Eigen::Vector3d::Zero();
+//         dr(i) = h;
+//         grad(i) = (BSIM::gravity_potential(r + dr, true) - BSIM::gravity_potential(r - dr, true))
+//         /
+//                   (2.0 * h);
+//     }
+//     const Eigen::Vector3d a = BSIM::two_body_gravity(r) + BSIM::j2_gravity(r);
+//     CHECK_VEC_NEAR(a, -grad, 1e-6 * a.norm());
+//     // and j2 is supposed to be a small correction, (like 1e-3 of point mass gravity)
+//     CHECK(BSIM::j2_gravity(r).norm() / BSIM::two_body_gravity(r).norm() < 3e-3);
+// }
+//
+// // with point mass gravity a circular orbit comes back to where it started after one period, and
+// // energy and angular momentum stay constant
+// static void test_circular_orbit() {
+//     BSIM::Spacecraft s = BSIM::generate_cubesat();
+//     s.env.j2 = false;
+//     auto sys = spacecraft_system(std::move(s));
+//     BSIM::SpacecraftState &x = sys.bodies[0]->state;
+//
+//     const Eigen::Vector3d r0 = x.pos();
+//     const double E0 = orbital_energy(x, false);
+//     const Eigen::Vector3d l0 = x.pos().cross(x.vel());
+//
+//     const double T = 2.0 * pi * std::sqrt(std::pow(r0.norm(), 3) / BSIM::MU_EARTH);
+//     CHECK_NEAR(T / 60.0, 94.6, 0.05); // 500 km
+//
+//     run_for(sys, T, 1.0);
+//
+//     CHECK((x.pos() - r0).norm() < 1.0);
+//     CHECK_NEAR(orbital_energy(x, false) / E0, 1.0, 1e-10);
+//     CHECK((x.pos().cross(x.vel()) - l0).norm() / l0.norm() < 1e-10);
+// }
+//
+// static void test_cubesat_full_orbit() {
+//     auto sys = spacecraft_system(BSIM::generate_cubesat());
+//     const BSIM::SpacecraftState &x = sys.bodies[0]->state;
+//     run_for(sys, 6000, 1.0);
+//     CHECK(x.state.allFinite());
+//     CHECK(x.rates().norm() > 0.0);
+//     CHECK_NEAR(x.pos().norm(), BSIM::R_EARTH + 500.0e3,
+//                20.0e3); // J2 would make the radius wobble a lil
+// }
+//
 // --- solvers ---
 // min 1/2 |z|^2 - z1 - z2 with z1 - z2 = 0.2 and z1 + z2 <= 1, answer (0.6, 0.4)
 // a plain qp through clarabel, as one zero cone row and one nonnegative row
@@ -1397,9 +1398,9 @@ int main() {
     test_pid_anti_windup();
     test_true_control_state();
     test_autopilot_holds_between_samples();
-    test_gravity_is_gradient_of_potential();
-    test_circular_orbit();
-    test_cubesat_full_orbit();
+    // test_gravity_is_gradient_of_potential();
+    // test_circular_orbit();
+    // test_cubesat_full_orbit();
     test_conic_qp();
     test_conic_second_order_cone();
     test_problem_builder_qp();

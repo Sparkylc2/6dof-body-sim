@@ -92,4 +92,17 @@ Wrench propulsion(const FixedWingParams &p, const AirData &air, double dt) {
     w.M.x() = -p.k_Tp * prop_rate * prop_rate;
     return w;
 }
+
+Wrench fixed_wing_wrench(double m, const FixedWingParams &p, const AircraftState &x,
+                         const AirState &air, const FixedWingControls &u) {
+
+    const AirData air_info = air_data(x.vel(), x.quat(), air);
+
+    Wrench w = gravity(m, x.quat());
+    w += longitudinal_aero(p, air_info, x.rates().y(), u.de);
+    w += lateral_aero(p, air_info, x.rates(), u.da, u.dr);
+    w += propulsion(p, air_info, u.dt);
+    return w;
+}
+
 } // namespace BSIM

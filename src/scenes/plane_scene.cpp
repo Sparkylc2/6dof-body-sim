@@ -6,6 +6,7 @@
 #include "body_system.hpp"
 #include "frames.hpp"
 #include "render/render.hpp"
+#include "scenes/keyboard.hpp"
 #include "scenes/scenes.hpp"
 #include "sensors.hpp" // wrap_angle
 #include "trim.hpp"
@@ -107,7 +108,7 @@ void run_plane_scene() {
             world.atmosphere.turbulence = !world.atmosphere.turbulence;
         }
         const double dt = GetFrameTime();
-        body.read_keyboard(dt);
+        read_keyboard(body, dt);
 
         // ignore rendering until its caught up (if the sim falls behind the timestep)
         t_behind += std::min(dt, 0.25);

@@ -1,4 +1,5 @@
 #pragma once
+#include "body_state.hpp"
 #include "force_models.hpp"
 #include <Eigen/Dense>
 
@@ -67,4 +68,10 @@ Wrench lateral_aero(const FixedWingParams &p, const AirData &air, const Vector3d
 // this assumes it the thrustline goes through the centroid
 // from eqn 4.18 (thrust force), and eqn 4.20 (prop gyro moment)
 Wrench propulsion(const FixedWingParams &p, const AirData &air, double dt);
+
+// everything acting on a fixed wing of mass m at state x with the controls u (gravity, aero and
+// propulsion), flying through air
+// (u is where the surfaces actually are, so any actuator dynamics have to happen before this)
+Wrench fixed_wing_wrench(double m, const FixedWingParams &p, const AircraftState &x,
+                         const AirState &air, const FixedWingControls &u);
 } // namespace BSIM

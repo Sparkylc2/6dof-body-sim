@@ -51,15 +51,10 @@ struct Body {
 // a basic drone, for now just gravity plus the forces and moments from the keyboard
 // uses the zagi's mass properties for now (Table E.1 in appendix E)
 struct Drone : Body {
-    Wrench input; // the forces and moments the keyboard is asking for (body frame)
+    // the forces and moments being asked for (body frame)
+    Wrench input;
 
     Drone();
-
-    // reads the keyboard into input, call once per frame before stepping
-    void read_keyboard();
-
-    Vector3d keyboard_force() const;
-    Vector3d keyboard_moment() const;
 
     // ignores the air, it's only gravity and the keyboard
     Wrench wrench(const AircraftState &x, const AirState &) const override;
@@ -77,10 +72,6 @@ struct FixedWing : Body {
     Actuator aileron;
 
     FixedWing(double m, const Vector4d &J, const FixedWingParams &params);
-
-    // w/s elevator (nose down/up), a/d aileron (roll left/right), q/e rudder (yaw left/right),
-    // up/down arrows throttle
-    void read_keyboard(double dt);
 
     // uses the current controls (with the aileron where its actuator has got to)
     Wrench wrench(const AircraftState &x, const AirState &air) const override;

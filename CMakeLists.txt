@@ -52,11 +52,14 @@ target_link_libraries(clarabel INTERFACE Eigen3::Eigen)
 add_dependencies(clarabel clarabel_cargo)
 
 
-add_library(bsim_core STATIC
+# --- the physics (bodies, force models, equations of motion, atmosphere, sensors) ---
+# only needs eigen, so anything outside the sim (like the matlab bridge) can link just this
+add_library(bsim_models STATIC
   src/frames.cpp
   src/force_models.cpp
   src/force_models/fixed_wing_model.cpp
   src/force_models/spacecraft_model.cpp
+  src/dynamics.cpp
   src/body.cpp
   src/actuators.cpp
   src/trim.cpp
@@ -64,28 +67,35 @@ add_library(bsim_core STATIC
   src/body_system.cpp
   src/air_system.cpp
   src/sensors.cpp
+  src/world.cpp
+)
+target_include_directories(bsim_models PUBLIC include)
+target_link_libraries(bsim_models PUBLIC Eigen3::Eigen)
+target_compile_options(bsim_models PRIVATE ${BSIM_WARNINGS})
+
+# --- control (autopilots, control blocks, the conic solver for scvx) ---
+add_library(bsim_control STATIC
   src/control/blocks.cpp
   src/control/autopilots/autopilot.cpp
   src/control/autopilots/lateral_autopilot.cpp
   src/control/autopilots/attitude_control.cpp
   src/control/autopilots/longitudinal_autopilot.cpp
-  src/world.cpp
   src/control/solvers/conic.cpp
   src/control/solvers/problem_builder.cpp
 )
-target_include_directories(bsim_core PUBLIC include)
-target_link_libraries(bsim_core PUBLIC Eigen3::Eigen PRIVATE raylib clarabel)
-target_compile_options(bsim_core PRIVATE ${BSIM_WARNINGS})
+target_link_libraries(bsim_control PUBLIC bsim_models PRIVATE clarabel)
+target_compile_options(bsim_control PRIVATE ${BSIM_WARNINGS})
 
 add_library(bsim_render STATIC
   src/render/render.cpp
 )
 target_include_directories(bsim_render PUBLIC src)
-target_link_libraries(bsim_render PUBLIC bsim_core raylib)
+target_link_libraries(bsim_render PUBLIC bsim_control raylib)
 target_compile_options(bsim_render PRIVATE ${BSIM_WARNINGS})
 
 add_executable(bsim
   src/main.cpp
+  src/scenes/keyboard.cpp
   src/scenes/plane_scene.cpp
   src/scenes/spacecraft_scene.cpp
   src/scenes/sindy_scene.cpp
@@ -94,13 +104,8 @@ add_executable(bsim
 target_link_libraries(bsim PRIVATE bsim_render)
 target_compile_options(bsim PRIVATE ${BSIM_WARNINGS})
 
-# headless experiment, hold order vs actuator dynamics (writes csvs for plotting)
-add_executable(bsim_soh_experiment experiments/soh_actuator.cpp)
-target_link_libraries(bsim_soh_experiment PRIVATE bsim_core)
-target_compile_options(bsim_soh_experiment PRIVATE ${BSIM_WARNINGS})
-
 enable_testing()
 add_executable(bsim_tests tests/test_main.cpp)
-target_link_libraries(bsim_tests PRIVATE bsim_core)
+target_link_libraries(bsim_tests PRIVATE bsim_control)
 target_compile_options(bsim_tests PRIVATE ${BSIM_WARNINGS})
 add_test(NAME bsim_tests COMMAND bsim_tests)
