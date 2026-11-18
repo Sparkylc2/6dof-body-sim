@@ -1,5 +1,6 @@
 #pragma once
 #include "body_state.hpp"
+#include "force_models/rocket_model.hpp"
 #include "force_models/spacecraft_model.hpp"
 #include <Eigen/Dense>
 
@@ -25,5 +26,17 @@ StateVector<SpacecraftState::SIZE> spacecraft_derivatives(const SpacecraftParams
                                                           const SpacecraftEnvironment &env,
                                                           const SpacecraftControls &u,
                                                           const SpacecraftState &x);
+
+// --- rocket ---
+// x_dot for a variable mass rocket with a gimballed engine and grid fins
+// (works out its own forces and moments, see force_models/rocket_model.hpp)
+//   u is where the actuators actually are, air comes from the atmosphere / wind models, and t is
+//   the sim time (only thrust curve engines use it, against u.t_ignition)
+//   terms, if given, gets every force and moment it used (for logging and the accelerometer)
+StateVector<RocketState::SIZE> rocket_derivatives(const RocketParams &p,
+                                                  const RocketEnvironment &env,
+                                                  const RocketControls &u, const RocketAir &air,
+                                                  const RocketState &x, double t,
+                                                  RocketTerms *terms = nullptr);
 
 } // namespace BSIM

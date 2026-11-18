@@ -1,0 +1,6 @@
+; Ember stand-in for drag sweeps: 5 kN for ~26 s, 60 kg propellant,
+; casing mass ~0 (the engine hardware is a mass component in the rocket)
+EmberFake 300 5000 0 60.0 60.001 ICLR
+0.05 5000
+25.90 5000
+26.00 0

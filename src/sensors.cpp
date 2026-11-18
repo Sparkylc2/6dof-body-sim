@@ -1,5 +1,5 @@
 #include "sensors.hpp"
-#include "body.hpp"
+#include "craft.hpp"
 #include "force_models/fixed_wing_model.hpp"
 #include "frames.hpp"
 #include <algorithm>

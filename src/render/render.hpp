@@ -1,5 +1,5 @@
 #pragma once
-#include "body.hpp"
+#include "craft.hpp"
 #include <Eigen/Dense>
 #include <raylib.h>
 #include <raymath.h>

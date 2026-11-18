@@ -1,7 +1,7 @@
 // src/scenes/plane_scene.cpp
 #include "control/autopilots/autopilot.hpp"
 #include "control/autopilots/lateral_autopilot.hpp"
-#include "body.hpp"
+#include "craft.hpp"
 #include "body_state.hpp"
 #include "body_system.hpp"
 #include "frames.hpp"

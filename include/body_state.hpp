@@ -72,4 +72,16 @@ struct SpacecraftState : RigidBodyState<17> {
     double mass() const { return state(S_MASS); }
 };
 
+enum ROCKET_IDX {
+    R_MASS = 13 // total mass [m]
+};
+
+// rocket, the mass goes on the end
+// [pn pe pd | vn ve vd | e0 e1 e2 e3 | p q r | m]
+// (pos and vel are the cm's, both in the inertial (NED) frame, like the spacecraft)
+struct RocketState : RigidBodyState<14> {
+    double &mass() { return state(R_MASS); }
+    double mass() const { return state(R_MASS); }
+};
+
 } // namespace BSIM

@@ -1,15 +1,23 @@
 #pragma once
 #include <Eigen/Dense>
 #include <memory>
+#include <vector>
 
 #include "actuators.hpp"
 #include "air_system.hpp"
 #include "body_state.hpp"
 #include "force_models.hpp"
 #include "force_models/fixed_wing_model.hpp"
+#include "force_models/rocket_model.hpp"
+#include "force_models/spacecraft_model.hpp"
 #include "sensors.hpp"
 
+// --- craft ---
+// every vehicle the sim flies: the structs holding a craft's parameters, controls, actuators and
+// state together, plus the factories for the built in ones
+// (the physics for each is in force_models/ and dynamics.hpp, these just hold the pieces)
 namespace BSIM {
+
 using Eigen::Ref;
 using Eigen::Vector3d;
 using Eigen::Vector4d;
@@ -90,4 +98,59 @@ FixedWing generate_zagi_flying_wing();
 // generates an imaginary sport plane (not from the book) with the same force model but much more
 // control authority, strong yaw stability, very little adverse yaw and about 2x thrust to weight
 FixedWing generate_sport_drone();
+
+// --- spacecraft ---
+// a rigid spacecraft with reaction wheels, thrusters and a fuel tank, in orbit around the earth
+// everything is in SI
+struct Spacecraft {
+    using State = SpacecraftState; // which state it carries (what the BodySystem steps)
+
+    SpacecraftParams params;
+    SpacecraftEnvironment env;   // which environment effects act on it
+    SpacecraftControls controls; // what the actuators are being asked to do
+
+    State state; // [r | v | q | w | h | m], r and v are inertial (earth centred)
+};
+
+// --- factory methods ---
+// generates a made up 6U cubesat (about 10 x 23 x 37 cm, 12 kg with 1 kg of fuel) with three
+// reaction wheels on the body axes and one main thruster pushing along +z through the cm,
+// starting in a 500 km circular orbit at 51.6 deg inclination, not rotating and full of fuel
+Spacecraft generate_cubesat();
+
+// --- rocket ---
+// a variable mass rocket with a gimballed engine and grid fins
+// the physics is all in rocket_derivatives (dynamics.hpp), this just holds the vehicle together
+// with its actuators
+struct Rocket {
+    using State = RocketState;
+
+    RocketParams params;
+    RocketEnvironment env;
+
+    // what the controller asks for (the gimbal and fin angles here are commands, the physics sees
+    // where the actuators have actually got to, see controls())
+    RocketControls commands;
+
+    Actuator gimbal_p, gimbal_y; // pitch and yaw gimbal servos
+    std::vector<Actuator> fins;  // one servo per grid fin
+
+    State state; // [p | v | q | w | m], p and v are the cm's, NED
+
+    // moves the gimbal and fins towards their commands over dt (call before the physics step)
+    // (the fin servos are held at 0 while the fins are stowed)
+    void step_actuators(double dt);
+
+    // the commands with the actuator positions swapped in (what goes into rocket_derivatives)
+    // (an ideal actuator is the same as having none, so its command goes straight through)
+    RocketControls controls() const;
+};
+
+// --- factory methods ---
+// a stand in for ICLR's Ember (7.5 m x 0.4 m, see data/openrocket): lox / ethanol with a
+// throttleable gimballed engine, four grid fins a bit above the middle (stowed until
+// commands.grid_fins_deployed is set), OpenRocket's drag curves, sitting on the pad nose up and
+// full of propellant. the masses and engine are placeholders until the real numbers are in
+Rocket generate_example_rocket();
+
 } // namespace BSIM

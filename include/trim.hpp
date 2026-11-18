@@ -2,7 +2,7 @@
 #include <Eigen/Dense>
 
 #include "air_system.hpp"
-#include "body.hpp"
+#include "craft.hpp"
 #include "body_state.hpp"
 #include "force_models/fixed_wing_model.hpp"
 

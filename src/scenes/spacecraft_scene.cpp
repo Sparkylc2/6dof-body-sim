@@ -5,7 +5,7 @@
 #include "render/render.hpp"
 #include "scenes/scenes.hpp"
 #include "sensors.hpp" // DEG
-#include "spacecraft.hpp"
+#include "craft.hpp"
 #include <Eigen/Dense>
 #include <algorithm>
 #include <cmath>

@@ -8,7 +8,7 @@
 //   every dt (one node) it replans from the measured state, warm started from the last plan
 //   (algorithm 1, K = 1). in the window the solve runs on a second thread so the frame rate
 //   doesn't die, and the plane keeps flying the old plan until the new one is ready
-#include "body.hpp"
+#include "craft.hpp"
 #include "control/autopilots/autopilot.hpp"
 #include "control/autopilots/lateral_autopilot.hpp"
 #include "control/autopilots/longitudinal_autopilot.hpp"

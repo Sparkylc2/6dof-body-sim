@@ -1,15 +1,15 @@
 #include "atmosphere.hpp"
-#include "body.hpp"
+#include "craft.hpp"
 #include "body_system.hpp"
 #include "control/autopilots/autopilot.hpp"
 #include "control/blocks.hpp"
 #include "control/scvx/scvx.hpp"
 #include "control/solvers/conic.hpp"
 #include "control/solvers/problem_builder.hpp"
+#include "dynamics.hpp"
 #include "force_models/fixed_wing_model.hpp"
 #include "frames.hpp"
 #include "sensors.hpp"
-#include "spacecraft.hpp"
 #include "tables.hpp"
 #include "world.hpp"
 #include <algorithm>
@@ -1479,6 +1479,379 @@ static void test_isa_is_continuous() {
     CHECK(falling);
 }
 
+// --- rocket (ai generated) ---
+using BSIM::Rocket;
+using BSIM::RocketAir;
+using BSIM::RocketControls;
+using BSIM::RocketEnvironment;
+using BSIM::RocketParams;
+using BSIM::RocketState;
+using BSIM::RocketTerms;
+using RocketVec = BSIM::StateVector<RocketState::SIZE>;
+
+static constexpr double R_DEG = std::numbers::pi / 180.0;
+
+static RocketAir rocket_vacuum() {
+    RocketAir a;
+    a.rho = 0.0;
+    a.p = 0.0;
+    return a;
+}
+
+static RocketState rocket_rk4(const RocketParams &p, const RocketEnvironment &env,
+                              const RocketControls &u, const RocketAir &air, const RocketState &x,
+                              double t, double dt) {
+    auto f = [&](const RocketState &s, double tt) {
+        return BSIM::rocket_derivatives(p, env, u, air, s, tt);
+    };
+    auto at = [](const RocketState &s, const RocketVec &d, double h) {
+        RocketState y = s;
+        y.state += h * d;
+        return y;
+    };
+    const RocketVec k1 = f(x, t);
+    const RocketVec k2 = f(at(x, k1, dt / 2), t + dt / 2);
+    const RocketVec k3 = f(at(x, k2, dt / 2), t + dt / 2);
+    const RocketVec k4 = f(at(x, k3, dt), t + dt);
+
+    RocketState out = x;
+    out.state += dt / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+    out.quat().normalize();
+    return out;
+}
+
+static void test_rocket_axial_multiplier_matches_openrocket() {
+    using BSIM::axial_drag_multiplier;
+    CHECK_NEAR(axial_drag_multiplier(0.0), 1.0, 1e-12);
+    CHECK_NEAR(axial_drag_multiplier(17 * R_DEG), 1.3, 1e-12);
+    CHECK_NEAR(axial_drag_multiplier(90 * R_DEG), 0.0, 1e-12);
+
+    const double h = 1e-6;
+    CHECK_NEAR(axial_drag_multiplier(17 * R_DEG - h), axial_drag_multiplier(17 * R_DEG + h), 1e-9);
+    CHECK_NEAR((axial_drag_multiplier(h) - axial_drag_multiplier(0.0)) / h, 0.0, 1e-4);
+    CHECK_NEAR((axial_drag_multiplier(90 * R_DEG) - axial_drag_multiplier(90 * R_DEG - h)) / h, 0.0,
+               1e-4);
+
+    CHECK_NEAR(axial_drag_multiplier((17.0 + 0.5 * 73.0) * R_DEG), 1.3 * 0.125 * 2.5, 1e-12);
+}
+
+static void test_rocket_axial_tail_first_is_flat_plate() {
+    const RocketParams p = BSIM::generate_example_rocket().params;
+
+    CHECK_NEAR(BSIM::rocket_CA(p, 0.1, false, 90 * R_DEG - 1e-9), 0.0, 1e-6);
+    CHECK_NEAR(BSIM::rocket_CA(p, 0.1, false, 90 * R_DEG + 1e-9), 0.0, 1e-6);
+
+    CHECK(BSIM::rocket_CA(p, 0.1, false, 120 * R_DEG) < 0.0);
+    CHECK_NEAR(BSIM::rocket_CA(p, 0.1, false, 180 * R_DEG), -p.CD_flat * p.A_base / p.A_ref(),
+               1e-12);
+}
+
+static void test_rocket_base_drag_drops_while_burning() {
+    const RocketParams p = BSIM::generate_example_rocket().params;
+    const double coast = BSIM::rocket_CD0(p, 0.5, false);
+    const double burn = BSIM::rocket_CD0(p, 0.5, true);
+    CHECK_NEAR(coast - burn, BSIM::base_drag_coefficient(0.5) * p.A_motor / p.A_ref(), 1e-12);
+}
+
+static void test_rocket_cd0_matches_openrocket_total() {
+    const RocketParams p = BSIM::generate_example_rocket().params;
+    CHECK_NEAR(BSIM::rocket_CD0(p, 0.3, false), 0.348, 2e-3);
+    CHECK_NEAR(BSIM::rocket_CD0(p, 1.1, false), 0.481, 2e-3);
+    CHECK_NEAR(BSIM::rocket_CD0(p, 2.0, false), 0.252, 2e-3);
+}
+
+static void test_rocket_mass_properties() {
+    const RocketParams p = BSIM::generate_example_rocket().params;
+
+    const auto empty = BSIM::rocket_mass_properties(p, p.m_dry);
+    CHECK_NEAR(empty.m, p.m_dry, 1e-12);
+    CHECK_NEAR(empty.x_cm, p.x_dry, 1e-12);
+    CHECK_NEAR(empty.It, p.It_dry, 1e-12);
+
+    const auto full = BSIM::rocket_mass_properties(p, p.m_dry + 60.0);
+    const auto half = BSIM::rocket_mass_properties(p, p.m_dry + 30.0);
+    CHECK(full.x_cm < half.x_cm && half.x_cm < empty.x_cm);
+
+    const BSIM::Matrix3d Jd = BSIM::rocket_J_dot(p, p.m_dry + 30.0, -1.0);
+    CHECK(Jd(1, 1) < 0.0);
+    CHECK_NEAR(Jd(0, 0), 0.0, 1e-9);
+
+    RocketParams s;
+    s.m_dry = 10.0;
+    s.It_dry = 1.0;
+    s.propellant.push_back({.kind = BSIM::PropellantStore::Kind::Solid,
+                            .share = 1.0,
+                            .x = 0.0,
+                            .R = 0.05,
+                            .rho = 1800.0,
+                            .L = 0.5});
+    const double Ri = 0.02;
+    const double m_g = 1800.0 * std::numbers::pi * 0.5 * (0.05 * 0.05 - Ri * Ri);
+    const auto g = BSIM::rocket_mass_properties(s, s.m_dry + m_g);
+    CHECK_NEAR(g.Ix, 0.5 * m_g * (0.05 * 0.05 + Ri * Ri), 1e-9);
+    CHECK_NEAR(g.It, 1.0 + m_g * ((0.05 * 0.05 + Ri * Ri) / 4.0 + 0.25 / 12.0), 1e-9);
+}
+
+static void test_rocket_thrust_with_altitude_and_curve() {
+    RocketParams p = BSIM::generate_example_rocket().params;
+    RocketControls u;
+    u.throttle = 1.0;
+
+    const auto sl = BSIM::rocket_engine(p, u, 0.0, p.m_dry + 30.0, 0.0, 101325.0);
+    const auto vac = BSIM::rocket_engine(p, u, 0.0, p.m_dry + 30.0, 0.0, 0.0);
+    CHECK_NEAR(vac.T - sl.T, 101325.0 * p.engine.A_e, 1e-9);
+    CHECK_NEAR(sl.m_dot_e, vac.m_dot_e, 1e-12);
+    CHECK_NEAR(vac.m_dot_e, p.engine.T_vac_max / (BSIM::ISA_G0 * p.engine.Isp_vac), 1e-12);
+
+    u.throttle = 0.5 * p.engine.throttle_min;
+    CHECK(BSIM::rocket_engine(p, u, 0.0, p.m_dry + 30.0, 0.0, 0.0).T == 0.0);
+    u.throttle = 1.0;
+    CHECK(BSIM::rocket_engine(p, u, 0.0, p.m_dry, 0.0, 0.0).T == 0.0);
+
+    p.engine.kind = BSIM::RocketEngine::Kind::ThrustCurve;
+    p.engine.thrust_curve = BSIM::Table1D({0.0, 1.0, 2.0}, {1000.0, 1000.0, 0.0});
+    p.engine.c_eff = 2000.0;
+    u.t_ignition = 10.0;
+    const auto c = BSIM::rocket_engine(p, u, 10.5, p.m_dry + 30.0, 0.0, 50000.0);
+    CHECK_NEAR(c.T, 1000.0 + (101325.0 - 50000.0) * p.engine.A_e, 1e-9);
+    CHECK_NEAR(c.m_dot_e, 0.5, 1e-12);
+    CHECK(BSIM::rocket_engine(p, u, 9.9, p.m_dry + 30.0, 0.0, 0.0).T == 0.0);
+    CHECK(BSIM::rocket_engine(p, u, 12.1, p.m_dry + 30.0, 0.0, 0.0).T == 0.0);
+}
+
+static void test_rocket_tsiolkovsky() {
+    Rocket r = BSIM::generate_example_rocket();
+    RocketEnvironment env;
+    env.gravity = false;
+    env.aero = false;
+    RocketControls u = r.controls();
+    u.throttle = 1.0;
+    const RocketAir air = rocket_vacuum();
+
+    const double m0 = r.state.mass();
+    const double m_dot = r.params.engine.T_vac_max / (BSIM::ISA_G0 * r.params.engine.Isp_vac);
+    const double t_burn = (m0 - r.params.m_dry) / m_dot;
+    const int n = 4000;
+    const double dt = t_burn / n;
+
+    RocketState x = r.state;
+    for (int i = 0; i < n; i++) {
+        x = rocket_rk4(r.params, env, u, air, x, i * dt, dt);
+    }
+
+    const double dv = BSIM::ISA_G0 * r.params.engine.Isp_vac * std::log(m0 / r.params.m_dry);
+    CHECK_NEAR(x.vel().norm(), dv, 1e-3 * dv);
+    CHECK_VEC_NEAR(x.vel().normalized(), Eigen::Vector3d(0.0, 0.0, -1.0), 1e-9);
+    CHECK_NEAR(x.mass(), r.params.m_dry, 1e-6);
+}
+
+static void test_rocket_tvc_moment_signs() {
+    Rocket r = BSIM::generate_example_rocket();
+    RocketEnvironment env;
+    env.gravity = false;
+    RocketControls u = r.controls();
+    u.throttle = 1.0;
+    const RocketAir air = rocket_vacuum();
+
+    RocketTerms T;
+    u.gimbal_p = 2.0 * R_DEG;
+    RocketVec xd = BSIM::rocket_derivatives(r.params, env, u, air, r.state, 0.0, &T);
+    const double l_g = T.mp.x_cm - r.params.engine.x_G;
+    CHECK(xd(BSIM::IDX::RATES + 1) > 0.0);
+    CHECK_NEAR(T.engine.wrench.M.y(), T.engine.T * l_g * std::sin(u.gimbal_p), 1e-9);
+    CHECK_NEAR(xd(BSIM::IDX::RATES + 1), T.engine.T * l_g * std::sin(u.gimbal_p) / T.mp.It, 1e-9);
+
+    u.gimbal_p = 0.0;
+    u.gimbal_y = 2.0 * R_DEG;
+    xd = BSIM::rocket_derivatives(r.params, env, u, air, r.state, 0.0, &T);
+    CHECK(xd(BSIM::IDX::RATES + 2) > 0.0);
+    CHECK_NEAR(T.engine.wrench.M.z(), T.engine.T * l_g * std::sin(u.gimbal_y), 1e-9);
+    CHECK_NEAR(T.engine.wrench.M.x(), 0.0, 1e-12);
+}
+
+static void test_rocket_jet_damping_and_J_dot() {
+    Rocket r = BSIM::generate_example_rocket();
+    RocketEnvironment env;
+    env.gravity = false;
+    RocketControls u = r.controls();
+    u.throttle = 1.0;
+    const RocketAir air = rocket_vacuum();
+
+    const double q = 0.5;
+    r.state.rates() = Eigen::Vector3d(0.0, q, 0.0);
+
+    RocketTerms T;
+    const RocketVec xd = BSIM::rocket_derivatives(r.params, env, u, air, r.state, 0.0, &T);
+    const double m_dot_e = T.engine.m_dot_e;
+    const double l_e = T.mp.x_cm - (r.params.engine.x_G - r.params.engine.L_n);
+
+    CHECK_NEAR(T.M_jet.y(), -m_dot_e * l_e * l_e * q, 1e-9);
+    CHECK_NEAR(T.M_J_dot.y(), -T.J_dot(1, 1) * q, 1e-12);
+    CHECK(T.M_J_dot.y() > 0.0);
+
+    CHECK_VEC_NEAR(T.F_cor, Eigen::Vector3d(0.0, 0.0, -2.0 * m_dot_e * l_e * q), 1e-9);
+
+    CHECK_NEAR(xd(BSIM::IDX::RATES + 1), (T.M_jet.y() + T.M_J_dot.y()) / T.mp.It, 1e-12);
+
+    env.jet_damping = false;
+    env.J_dot = false;
+    env.coriolis = false;
+    const RocketVec off = BSIM::rocket_derivatives(r.params, env, u, air, r.state, 0.0);
+    CHECK_NEAR(off(BSIM::IDX::RATES + 1), 0.0, 1e-12);
+}
+
+static RocketParams rocket_cylinder(int n) {
+    RocketParams p;
+    p.d = 0.3;
+    p.C_dc = 1.1;
+    const double dx = 8.0 / n;
+    for (int i = 0; i < n; i++) {
+        p.slices.push_back({.x = -4.0 + (i + 0.5) * dx, .d = 0.3, .dx = dx});
+    }
+    return p;
+}
+
+static void test_rocket_crossflow_damping_matches_openrocket() {
+    const RocketParams p = rocket_cylinder(800);
+    BSIM::RocketAirData ad;
+    ad.rho = 1.225;
+
+    const double expected = 0.275 * 1.225 * 0.15 * (std::pow(4.0, 4) + std::pow(4.0, 4));
+    const BSIM::Wrench up = BSIM::rocket_crossflow(p, ad, Eigen::Vector3d(0.0, 1.0, 0.0), 0.0);
+    CHECK_NEAR(up.M.y(), -expected, 1e-3 * expected);
+    CHECK_NEAR(up.F.z(), 0.0, 1e-9);
+
+    const BSIM::Wrench yaw = BSIM::rocket_crossflow(p, ad, Eigen::Vector3d(0.0, 0.0, -1.0), 0.0);
+    CHECK_NEAR(yaw.M.z(), expected, 1e-3 * expected);
+}
+
+static void test_rocket_crossflow_without_rotation_is_body_lift() {
+    const RocketParams p = rocket_cylinder(80);
+    BSIM::RocketAirData ad;
+    ad.rho = 1.225;
+    ad.v_r = Eigen::Vector3d(50.0, 3.0, 4.0);
+
+    const BSIM::Wrench w = BSIM::rocket_crossflow(p, ad, Eigen::Vector3d::Zero(), 0.0);
+    const double k = -0.5 * 1.225 * 1.1 * (8.0 * 0.3) * 5.0;
+    CHECK_VEC_NEAR(w.F, Eigen::Vector3d(0.0, k * 3.0, k * 4.0), 1e-9);
+    CHECK_VEC_NEAR(w.M, Eigen::Vector3d::Zero(), 1e-9);
+}
+
+static void test_rocket_grid_fins() {
+    const RocketParams p = BSIM::generate_example_rocket().params;
+    const double x_cm = BSIM::rocket_mass_properties(p, p.m_dry + 60.0).x_cm;
+    BSIM::RocketAirData ad;
+    ad.rho = 1.225;
+    ad.v_r = Eigen::Vector3d(50.0, 0.0, 0.0);
+    RocketControls u;
+    u.grid_fins_deployed = true;
+
+    u.fins = {5 * R_DEG, 5 * R_DEG, 5 * R_DEG, 5 * R_DEG};
+    BSIM::Wrench w = BSIM::rocket_grid_fins(p, u, ad, Eigen::Vector3d::Zero(), x_cm);
+    CHECK(w.M.x() < 0.0);
+    CHECK_NEAR(w.F.y(), 0.0, 1e-9);
+    CHECK_NEAR(w.F.z(), 0.0, 1e-9);
+    CHECK_NEAR(w.M.y(), 0.0, 1e-9);
+    CHECK_NEAR(w.M.z(), 0.0, 1e-9);
+
+    u.fins = {5 * R_DEG, 0.0, -5 * R_DEG, 0.0};
+    w = BSIM::rocket_grid_fins(p, u, ad, Eigen::Vector3d::Zero(), x_cm);
+    CHECK(w.M.y() > 0.0);
+    CHECK_NEAR(w.M.x(), 0.0, 1e-9);
+
+    ad.v_r = Eigen::Vector3d(-50.0, 0.0, 0.0);
+    const BSIM::Wrench back = BSIM::rocket_grid_fins(p, u, ad, Eigen::Vector3d::Zero(), x_cm);
+    CHECK_NEAR(back.M.y(), -w.M.y(), 1e-9);
+}
+
+static void test_rocket_grid_fins_stowed_until_deployed() {
+    Rocket r = BSIM::generate_example_rocket();
+    const double x_cm = BSIM::rocket_mass_properties(r.params, r.state.mass()).x_cm;
+    BSIM::RocketAirData ad;
+    ad.rho = 1.225;
+    ad.v_r = Eigen::Vector3d(50.0, 2.0, 3.0);
+    const Eigen::Vector3d w(0.1, 0.2, 0.3);
+    RocketControls u;
+    u.fins = {5 * R_DEG, 0.0, -5 * R_DEG, 0.0};
+
+    BSIM::Wrench f = BSIM::rocket_grid_fins(r.params, u, ad, w, x_cm);
+    CHECK_VEC_NEAR(f.F, Eigen::Vector3d::Zero(), 0.0);
+    CHECK_VEC_NEAR(f.M, Eigen::Vector3d::Zero(), 0.0);
+
+    u.grid_fins_deployed = true;
+    f = BSIM::rocket_grid_fins(r.params, u, ad, w, x_cm);
+    CHECK(f.F.norm() > 0.0);
+
+    r.commands.fins = {10 * R_DEG, 10 * R_DEG, 10 * R_DEG, 10 * R_DEG};
+    for (int i = 0; i < 100; i++) {
+        r.step_actuators(0.01);
+    }
+    CHECK_NEAR(r.controls().fins[0], 0.0, 1e-12);
+
+    r.commands.grid_fins_deployed = true;
+    for (int i = 0; i < 100; i++) {
+        r.step_actuators(0.01);
+    }
+    CHECK_NEAR(r.controls().fins[0], 10 * R_DEG, 1e-3);
+}
+
+static void test_rocket_on_pad_engine_off_falls() {
+    const Rocket r = BSIM::generate_example_rocket();
+    const RocketVec xd =
+        BSIM::rocket_derivatives(r.params, r.env, r.controls(), RocketAir{}, r.state, 0.0);
+
+    CHECK_VEC_NEAR(Eigen::Vector3d(xd.segment<3>(BSIM::IDX::VEL)),
+                   Eigen::Vector3d(0.0, 0.0, BSIM::ISA_G0), 1e-12);
+    CHECK_VEC_NEAR(Eigen::Vector3d(xd.segment<3>(BSIM::IDX::RATES)), Eigen::Vector3d::Zero(), 1e-12);
+    CHECK_NEAR(xd(BSIM::ROCKET_IDX::R_MASS), 0.0, 1e-12);
+
+    const BSIM::Matrix3d R = BSIM::rotation(r.state.quat());
+    CHECK_VEC_NEAR(Eigen::Vector3d(R * Eigen::Vector3d::UnitX()), Eigen::Vector3d(0.0, 0.0, -1.0),
+                   1e-12);
+}
+
+static void test_rocket_torque_free_conserves_momentum() {
+    Rocket r = BSIM::generate_example_rocket();
+    RocketEnvironment env;
+    env.gravity = false;
+    const RocketControls u = r.controls();
+    const RocketAir air = rocket_vacuum();
+
+    r.state.rates() = Eigen::Vector3d(2.0, 0.3, -0.1);
+    const auto mp = BSIM::rocket_mass_properties(r.params, r.state.mass());
+    auto H = [&](const RocketState &s) -> Eigen::Vector3d {
+        return BSIM::rotation(s.quat()) * mp.J() * s.rates();
+    };
+    const Eigen::Vector3d H0 = H(r.state);
+
+    RocketState x = r.state;
+    const double dt = 1e-3;
+    for (int i = 0; i < 5000; i++) {
+        x = rocket_rk4(r.params, env, u, air, x, i * dt, dt);
+    }
+    CHECK_VEC_NEAR(H(x), H0, 1e-7 * H0.norm());
+}
+
+static void test_rocket_example_lifts_off() {
+    Rocket r = BSIM::generate_example_rocket();
+    r.commands.throttle = 1.0;
+    r.commands.gimbal_p = 1.0 * R_DEG;
+    r.commands.fins = {2 * R_DEG, 0.0, -2 * R_DEG, 0.0};
+    RocketAir air;
+
+    const double dt = 0.01;
+    for (int i = 0; i < 300; i++) {
+        r.step_actuators(dt);
+        r.state = rocket_rk4(r.params, r.env, r.controls(), air, r.state, i * dt, dt);
+    }
+
+    CHECK(r.state.state.allFinite());
+    CHECK(-r.state.pos().z() > 10.0);
+    CHECK(r.state.mass() < r.params.m_dry + 60.0);
+    CHECK_NEAR(r.state.quat().norm(), 1.0, 1e-12);
+    CHECK_NEAR(r.controls().gimbal_p, 1.0 * R_DEG, 1e-3);
+}
+
 int main() {
     test_rotation_is_orthonormal();
     test_rotation_sign_conventions();
@@ -1543,6 +1916,22 @@ int main() {
     test_isa_sea_level();
     test_isa_matches_standard_tables();
     test_isa_is_continuous();
+    test_rocket_axial_multiplier_matches_openrocket();
+    test_rocket_axial_tail_first_is_flat_plate();
+    test_rocket_base_drag_drops_while_burning();
+    test_rocket_cd0_matches_openrocket_total();
+    test_rocket_mass_properties();
+    test_rocket_thrust_with_altitude_and_curve();
+    test_rocket_tsiolkovsky();
+    test_rocket_tvc_moment_signs();
+    test_rocket_jet_damping_and_J_dot();
+    test_rocket_crossflow_damping_matches_openrocket();
+    test_rocket_crossflow_without_rotation_is_body_lift();
+    test_rocket_grid_fins();
+    test_rocket_grid_fins_stowed_until_deployed();
+    test_rocket_on_pad_engine_off_falls();
+    test_rocket_torque_free_conserves_momentum();
+    test_rocket_example_lifts_off();
 
     std::printf("%d/%d passed\n (pray its all right xD)", g_checks - g_failures, g_checks);
     return g_failures == 0 ? 0 : 1;

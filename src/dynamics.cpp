@@ -118,4 +118,39 @@ StateVector<SpacecraftState::SIZE> spacecraft_derivatives(const SpacecraftParams
     return x_dot;
 }
 
+// --- rocket ---
+StateVector<RocketState::SIZE> rocket_derivatives(const RocketParams &p,
+                                                  const RocketEnvironment &env,
+                                                  const RocketControls &u, const RocketAir &air,
+                                                  const RocketState &x, double t,
+                                                  RocketTerms *terms) {
+    StateVector<RocketState::SIZE> x_dot;
+
+    const RocketTerms T = rocket_terms(p, env, u, air, x, t);
+    const Vector3d w = x.rates();
+    const Matrix3d R = rotation(x.quat()); // body to inertial
+
+    // --- translational accel --- (inertial velocity, so no w x v term)
+    // thrust + aero + the coriolis force from the exhaust flow, all through the cm
+    const Vector3d accel = T.g_i + R * T.F_body() / T.mp.m;
+
+    // --- rotational accel ---
+    // J w_dot = M - J_dot w - m_dot_e rho_e x (w x rho_e) - w x J w
+    // (the J_dot and jet damping terms are already in M_body, and J is diagonal)
+    const Vector3d Jdiag(T.mp.Ix, T.mp.It, T.mp.It);
+    const Vector3d Jw = Jdiag.cwiseProduct(w);
+    const Vector3d w_dot = (T.M_body() - w.cross(Jw)).cwiseQuotient(Jdiag);
+
+    x_dot.segment<3>(IDX::POS) = x.vel();
+    x_dot.segment<3>(IDX::VEL) = accel;
+    x_dot.segment<4>(IDX::QUAT) = quat_rate(x.quat(), w);
+    x_dot.segment<3>(IDX::RATES) = w_dot;
+    x_dot(ROCKET_IDX::R_MASS) = -T.engine.m_dot_e;
+
+    if (terms) {
+        *terms = T;
+    }
+    return x_dot;
+}
+
 } // namespace BSIM

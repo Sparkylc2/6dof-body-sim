@@ -1,5 +1,5 @@
 #pragma once
-#include "body.hpp"
+#include "craft.hpp"
 
 // keyboard controls for the bodies, kept out of bsim_core so the physics doesn't need raylib
 // (call once per frame before stepping)

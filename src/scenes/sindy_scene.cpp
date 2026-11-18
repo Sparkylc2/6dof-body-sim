@@ -1,7 +1,7 @@
 // src/scenes/sindy_scene.cpp
 #include "SINDy/get_training_data.hpp"
 #include "SINDy/model.hpp"
-#include "body.hpp"
+#include "craft.hpp"
 #include "frames.hpp"
 #include "render/render.hpp"
 #include "scenes/scenes.hpp"

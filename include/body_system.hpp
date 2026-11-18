@@ -3,10 +3,9 @@
 #include <memory>
 #include <vector>
 
-#include "body.hpp"
+#include "craft.hpp"
 #include "body_state.hpp"
 #include "force_models.hpp"
-#include "spacecraft.hpp"
 
 namespace BSIM {
 using Eigen::Ref;

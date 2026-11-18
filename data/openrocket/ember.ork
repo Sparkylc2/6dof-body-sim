@@ -1,0 +1,179 @@
+<?xml version='1.0' encoding='utf-8'?>
+<openrocket version="1.10" creator="BSIM (hand written)">
+  <rocket>
+    <name>Ember</name>
+    <id>62dc338d-36bb-4c30-8084-4cd87949a5e9</id>
+    <axialoffset method="absolute">0.0</axialoffset>
+    <position type="absolute">0.0</position>
+    <designer>ICLR Ember stand-in (placeholder, replace with Ember's real numbers)</designer>
+    <motorconfiguration configid="83be7bdb-c802-408c-9943-ff59fcc81579" default="true">
+      <stage number="0" active="true"/>
+    </motorconfiguration>
+    <referencetype>maximum</referencetype>
+    <subcomponents>
+      <stage>
+        <name>Sustainer</name>
+        <id>a494a0d2-21cd-4871-961f-b5cc37b8d1b4</id>
+        <subcomponents>
+          <nosecone>
+            <name>Nose cone</name>
+            <id>f48cdfbd-3e75-4c9d-8da6-9c4440d6eb24</id>
+            <finish>normal</finish>
+            <material type="bulk" density="1850.0">Fiberglass</material>
+            <length>1.5</length>
+            <thickness>0.003</thickness>
+            <shape>ogive</shape>
+            <shapeclipped>false</shapeclipped>
+            <shapeparameter>1.0</shapeparameter>
+            <aftradius>0.2</aftradius>
+            <aftshoulderradius>0.0</aftshoulderradius>
+            <aftshoulderlength>0.0</aftshoulderlength>
+            <aftshoulderthickness>0.0</aftshoulderthickness>
+            <aftshouldercapped>false</aftshouldercapped>
+            <isflipped>false</isflipped>
+            <comment>tangent ogive, material and wall thickness are placeholder, replace with Ember's real numbers</comment>
+          </nosecone>
+
+          <bodytube>
+            <name>Body tube</name>
+            <id>6ee865ee-87f0-4dfd-a3a6-c62fdb097c17</id>
+            <finish>normal</finish>
+            <material type="bulk" density="1850.0">Fiberglass</material>
+            <length>6.0</length>
+            <thickness>0.003</thickness>
+            <radius>0.2</radius>
+            <comment>material and wall thickness are placeholder, replace with Ember's real numbers</comment>
+            <motormount>
+              <ignitionevent>automatic</ignitionevent>
+              <ignitiondelay>0.0</ignitiondelay>
+              <overhang>0.0</overhang>
+              <motor configid="83be7bdb-c802-408c-9943-ff59fcc81579">
+                <manufacturer>ICLR</manufacturer>
+                <designation>EmberFake</designation>
+                <diameter>0.3</diameter>
+                <length>5.0</length>
+                <delay>none</delay>
+              </motor>
+            </motormount>
+            <subcomponents>
+            <masscomponent>
+              <name>Avionics</name>
+              <id>ea0d9332-58b5-4a1e-9dd4-40af89a01650</id>
+              <axialoffset method="top">0.55</axialoffset>
+              <position type="top">0.55</position>
+              <packedlength>0.3</packedlength>
+              <packedradius>0.15</packedradius>
+              <radialposition>0.0</radialposition>
+              <radialdirection>0.0</radialdirection>
+              <mass>5.0</mass>
+              <masscomponenttype>flightcomputer</masscomponenttype>
+              <comment>placeholder, replace with Ember's real numbers</comment>
+            </masscomponent>
+
+            <masscomponent>
+              <name>COPV (pressurant)</name>
+              <id>aae43900-2f07-4914-83e5-e15387300ccb</id>
+              <axialoffset method="top">1.6</axialoffset>
+              <position type="top">1.6</position>
+              <packedlength>0.6</packedlength>
+              <packedradius>0.15</packedradius>
+              <radialposition>0.0</radialposition>
+              <radialdirection>0.0</radialdirection>
+              <mass>15.0</mass>
+              <masscomponenttype>masscomponent</masscomponenttype>
+              <comment>placeholder, replace with Ember's real numbers</comment>
+            </masscomponent>
+
+            <masscomponent>
+              <name>Grid fins (stowed)</name>
+              <id>6129a703-3782-4272-bc98-66c0de7b68ab</id>
+              <axialoffset method="top">1.7</axialoffset>
+              <position type="top">1.7</position>
+              <packedlength>0.2</packedlength>
+              <packedradius>0.15</packedradius>
+              <radialposition>0.0</radialposition>
+              <radialdirection>0.0</radialdirection>
+              <mass>8.0</mass>
+              <masscomponenttype>masscomponent</masscomponenttype>
+              <comment>placeholder, replace with Ember's real numbers</comment>
+            </masscomponent>
+
+            <masscomponent>
+              <name>Oxidiser tank (empty)</name>
+              <id>bfbd2242-2b3e-4175-bb96-87c3e07f0304</id>
+              <axialoffset method="top">2.4</axialoffset>
+              <position type="top">2.4</position>
+              <packedlength>1.0</packedlength>
+              <packedradius>0.15</packedradius>
+              <radialposition>0.0</radialposition>
+              <radialdirection>0.0</radialdirection>
+              <mass>20.0</mass>
+              <masscomponenttype>masscomponent</masscomponenttype>
+              <comment>placeholder, replace with Ember's real numbers</comment>
+            </masscomponent>
+
+            <masscomponent>
+              <name>Fuel tank (empty)</name>
+              <id>3bcfd6f6-af43-45da-8baa-acd1abba2c76</id>
+              <axialoffset method="top">3.7</axialoffset>
+              <position type="top">3.7</position>
+              <packedlength>0.8</packedlength>
+              <packedradius>0.15</packedradius>
+              <radialposition>0.0</radialposition>
+              <radialdirection>0.0</radialdirection>
+              <mass>15.0</mass>
+              <masscomponenttype>masscomponent</masscomponenttype>
+              <comment>placeholder, replace with Ember's real numbers</comment>
+            </masscomponent>
+
+            <masscomponent>
+              <name>Plumbing and valves</name>
+              <id>809c7f58-cb2a-448e-9cd9-4ca513d53719</id>
+              <axialoffset method="top">4.9</axialoffset>
+              <position type="top">4.9</position>
+              <packedlength>0.4</packedlength>
+              <packedradius>0.15</packedradius>
+              <radialposition>0.0</radialposition>
+              <radialdirection>0.0</radialdirection>
+              <mass>10.0</mass>
+              <masscomponenttype>masscomponent</masscomponenttype>
+              <comment>placeholder, replace with Ember's real numbers</comment>
+            </masscomponent>
+
+            <masscomponent>
+              <name>Landing legs (stowed)</name>
+              <id>fba90089-2bd2-4279-9f47-d20030be2654</id>
+              <axialoffset method="top">4.9</axialoffset>
+              <position type="top">4.9</position>
+              <packedlength>1.0</packedlength>
+              <packedradius>0.15</packedradius>
+              <radialposition>0.0</radialposition>
+              <radialdirection>0.0</radialdirection>
+              <mass>15.0</mass>
+              <masscomponenttype>masscomponent</masscomponenttype>
+              <comment>placeholder, replace with Ember's real numbers</comment>
+            </masscomponent>
+
+            <masscomponent>
+              <name>Engine and gimbal</name>
+              <id>b1151235-a63e-4e92-823a-a2733a2a8aef</id>
+              <axialoffset method="top">5.4</axialoffset>
+              <position type="top">5.4</position>
+              <packedlength>0.6</packedlength>
+              <packedradius>0.15</packedradius>
+              <radialposition>0.0</radialposition>
+              <radialdirection>0.0</radialdirection>
+              <mass>25.0</mass>
+              <masscomponenttype>masscomponent</masscomponenttype>
+              <comment>placeholder, replace with Ember's real numbers</comment>
+            </masscomponent>
+            </subcomponents>
+          </bodytube>
+        </subcomponents>
+      </stage>
+    </subcomponents>
+  </rocket>
+
+  <simulations>
+  </simulations>
+</openrocket>
