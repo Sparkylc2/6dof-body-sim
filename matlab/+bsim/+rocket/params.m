@@ -15,7 +15,7 @@ function [P, x0, act] = params(name)
 %       fins        n, x, r, phi0, S, CN_alpha, CD0
 %       env         gravity, aero, jet_damping, J_dot, coriolis (logical)
 %   x0  14x1 [pn pe pd | vn ve vd | e0 e1 e2 e3 | p q r | m], on the pad, nose up, full
-%   act the actuators that go with it (gimbal, fin), the bridge doesn't run these, they're
-%       for building your own in simulink: kind, tau, wn, zeta, rate_max, pos_max
+%   act the grid fin servo numbers (fin: kind, tau, wn, zeta, rate_max, pos_max), for building
+%       them in simulink. the gimbal is the hydraulic TVC, see bsim.tvc.params('ember')
 [P, x0, act] = bsim_mex('rocket_params', name);
 end

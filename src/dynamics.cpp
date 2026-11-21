@@ -1,4 +1,5 @@
 #include "dynamics.hpp"
+#include "force_models/tvc_model.hpp"
 #include "frames.hpp"
 
 namespace BSIM {
@@ -135,11 +136,11 @@ StateVector<RocketState::SIZE> rocket_derivatives(const RocketParams &p,
     const Vector3d accel = T.g_i + R * T.F_body() / T.mp.m;
 
     // --- rotational accel ---
-    // J w_dot = M - J_dot w - m_dot_e rho_e x (w x rho_e) - w x J w
-    // (the J_dot and jet damping terms are already in M_body, and J is diagonal)
-    const Vector3d Jdiag(T.mp.Ix, T.mp.It, T.mp.It);
-    const Vector3d Jw = Jdiag.cwiseProduct(w);
-    const Vector3d w_dot = (T.M_body() - w.cross(Jw)).cwiseQuotient(Jdiag);
+    // J w_dot = M - J_dot w - m_dot_e rho_e x (w x rho_e) - w x J w + (gimbal terms)
+    // (the J_dot, jet damping and gimbal terms are already in M_body)
+    // J is diagonal unless the gimbal mass is swung off the axis, so solve it as a full 3x3
+    const Matrix3d J = T.J();
+    const Vector3d w_dot = J.ldlt().solve(T.M_body() - w.cross(J * w));
 
     x_dot.segment<3>(IDX::POS) = x.vel();
     x_dot.segment<3>(IDX::VEL) = accel;
@@ -149,6 +150,8 @@ StateVector<RocketState::SIZE> rocket_derivatives(const RocketParams &p,
 
     if (terms) {
         *terms = T;
+        terms->hinge = rocket_hinge_torque(p, u, w, w_dot, T.mp.x_cm, T.F_body() / T.mp.m);
+        terms->nozzle_load = rocket_nozzle_load(p, u, w, w_dot, T.mp.x_cm, T.F_body() / T.mp.m);
     }
     return x_dot;
 }

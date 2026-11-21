@@ -7,6 +7,7 @@
 #include "force_models/fixed_wing_model.hpp"
 #include "force_models/rocket_model.hpp"
 #include "force_models/spacecraft_model.hpp"
+#include "force_models/tvc_model.hpp"
 #include <Eigen/Dense>
 #include <vector>
 
@@ -69,13 +70,29 @@ std::vector<double> pack_rocket(const RocketDef &d);
 struct RocketExample {
     RocketDef def;
     RocketState x0;
-    Actuator gimbal, fin;
+    Actuator fin;  // the grid fin servos
+    TvcParams tvc; // the hydraulic TVC swinging the engine
 };
 RocketExample rocket_example();
 
-RocketControls unpack_rocket_controls(const double *u, int n_fins);
+// with_motion: u carries the gimbal's rates and accelerations after the fins (see bsim_c.h)
+RocketControls unpack_rocket_controls(const double *u, int n_fins, bool with_motion);
 RocketAir unpack_rocket_air(const double *air);
 
 AirState unpack_air(const double *air);
+
+// every TvcParams field, in the order they're packed
+// (adding a field to TvcParams without adding it here fails a static_assert in bsim_c.cpp)
+// clang-format off
+#define BSIM_TVC_FIELDS(X)                                                                         \
+    X(x_a) X(r_a) X(x_b) X(r_b) X(phi0) X(stroke)                                                  \
+    X(A_p) X(P_s) X(Q_max) X(beta) X(V_t) X(C_tp) X(tau_v) X(K_p)                                  \
+    X(m_n) X(l_n) X(I_na) X(I_nt)                                                                  \
+    X(offset_p) X(offset_y) X(friction) X(damping)                                                 \
+    X(h)
+// clang-format on
+
+TvcParams unpack_tvc(const double *P);
+void pack_tvc(const TvcParams &p, double *P);
 
 } // namespace BSIM::Bridge

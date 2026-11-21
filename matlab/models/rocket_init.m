@@ -2,6 +2,9 @@ run(fullfile(fileparts(mfilename('fullpath')), '..', 'setup.m'));
 [S, x0, act] = bsim.rocket.params('example');
 Prk = bsim.rocket.pack(S);
 
+% the hydraulic TVC that swings the engine (placeholders from the Ember TVC actuator notes)
+Ptvc = bsim.tvc.pack(bsim.tvc.params('ember'));
+
 % open bsim.rocket.replay once a run has finished (the model's StopFcn), false to skip it
 show_replay = true;
 

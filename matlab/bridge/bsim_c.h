@@ -15,10 +15,13 @@
  *   air [8]:                 [rho a | wind_i (3, inertial) | gust_b (3, body)]
  *   spacecraft state x [17]: [r (3) | v (3) | q (4) | w (3) | h_wheels (3) | m]   (r, v inertial)
  *   rocket state x [14]:     [pn pe pd | vn ve vd | e0 e1 e2 e3 | p q r | m]  (cm pos/vel, NED)
- *   rocket controls [5 + n_fins]:
- *                            [gimbal_p gimbal_y throttle t_ignition fins_deployed | fin_1..fin_n]
+ *   rocket controls [9 + n_fins], or [5 + n_fins] without the gimbal's motion (taken as still):
+ *                            [gimbal_p gimbal_y throttle t_ignition fins_deployed | fin_1..fin_n |
+ *                             gimbal_p_dot gimbal_y_dot gimbal_p_ddot gimbal_y_ddot]
  *                            (where the actuators actually are, rad, throttle 0-1, t_ignition is
- *                             the sim time a thrust curve motor was lit, inf for not yet)
+ *                             the sim time a thrust curve motor was lit, inf for not yet. the
+ *                             gimbal's rates and accelerations, from its servos, drive the swinging
+ *                             engine's dynamics, see force_models/tvc_model.hpp)
  *   rocket air [9]:          [rho a p | wind_i (3, NED) | gust_b (3, body)]
  */
 #ifndef BSIM_C_H
@@ -44,28 +47,29 @@ extern "C" {
 #define BSIM_SPACECRAFT_NP(n_thrusters) (BSIM_SPACECRAFT_NP_BASE + BSIM_THRUSTER_NP * (n_thrusters))
 
 #define BSIM_ROCKET_NX 14
-#define BSIM_ROCKET_NU(n_fins) (5 + (n_fins))
+#define BSIM_ROCKET_NU(n_fins) (9 + (n_fins))
+#define BSIM_ROCKET_NU_STILL(n_fins) (5 + (n_fins)) /* the gimbal's motion left out */
 #define BSIM_ROCKET_AIR_N 9
 
 /* the rocket's P is variable length, a fixed head then the lists it says it has:
  *   [0]  m_dry x_dry Ix_dry It_dry
  *   [4]  d A_base A_motor C_dc CD_flat
  *   [9]  engine: kind (0 throttleable, 1 thrust curve) c_eff p_test T_vac_max Isp_vac
- *                throttle_min A_e x_G L_n
- *   [18] fins: n x r phi0 S CN_alpha CD0
- *   [25] env: gravity aero jet_damping J_dot coriolis (1 = on)
- *   [30] counts: n_propellant n_components n_slices n_thrust_curve n_friction n_pressure
+ *                throttle_min A_e x_G L_n m_n l_n I_na I_nt
+ *   [22] fins: n x r phi0 S CN_alpha CD0
+ *   [29] env: gravity aero jet_damping J_dot coriolis (1 = on)
+ *   [34] counts: n_propellant n_components n_slices n_thrust_curve n_friction n_pressure
  *                n_parasitic
- *   [37] then in that order:
+ *   [41] then in that order:
  *        propellant  6 each [kind (0 liquid, 1 solid) share x R rho L]
  *        components  2 each [CN_alpha x_cp]
  *        slices      3 each [x d dx]
  *        each table (thrust curve, friction, pressure, parasitic): all its x, then all its y
  * an empty table is fine (it counts as zero)                                              */
-#define BSIM_ROCKET_NP_HEAD 37
+#define BSIM_ROCKET_NP_HEAD 41
 
 /* what came out of the rocket's x_dot (body frame unless it says otherwise) */
-#define BSIM_ROCKET_NTERMS 34
+#define BSIM_ROCKET_NTERMS 41
 /*   [0]  m x_cm Ix It           mass properties right now (x_cm is a station, see rocket_model.hpp)
  *   [4]  T m_dot_e              thrust [N], exhaust mass flow [kg/s]
  *   [6]  V mach qbar alpha_t    air data (alpha_t is the total angle of attack, 0 to pi)
@@ -76,7 +80,12 @@ extern "C" {
  *   [22] g_i (3)                gravity (NED)
  *   [25] n_T (3)                direction the thrust pushes (follows the gimbal, even when off)
  *   [28] rho_e (3)              nozzle exit from the cm
- *   [31] v_r (3)                velocity relative to the air                               */
+ *   [31] v_r (3)                velocity relative to the air
+ *   [34] M_gimbal (3)           every moment from the swinging engine (tail wags dog, coriolis,
+ *                               changing geometry, swinging exit), already part of M_body
+ *   [37] hinge (2)              torque the gimbal servos have to supply [pitch, yaw] [N m]
+ *   [39] nozzle_load (2)        the vehicle's load on the nozzle (what the TVC's load input
+ *                               wants, a step late is fine) [N m]                               */
 
 /* ---- aircraft ---- */
 
@@ -116,10 +125,10 @@ int bsim_spacecraft_cubesat(double *P, int nP_max, double x0[17]);
 /* ---- rocket ---- */
 
 /* x_dot, and the terms it came from (see BSIM_ROCKET_NTERMS)
- * returns 0, or -1 if P isn't a valid packed rocket or nU isn't 5 + its fin count
+ * returns 0, or -1 if P isn't a valid packed rocket or nU isn't 9 (or 5) + its fin count
  * (xdot and terms are filled with NaN then, so a sim using them goes obviously wrong) */
 int bsim_rocket_xdot(const double *P, int nP, const double x[14], const double *u, int nU,
-                     const double air[9], double t, double xdot[14], double terms[34]);
+                     const double air[9], double t, double xdot[14], double terms[41]);
 
 /* the packed parameters and starting state (on the pad, nose up, full) of the example rocket
  * returns how many entries P needs (nothing is written if nP_max is too small) */
@@ -127,6 +136,41 @@ int bsim_rocket_example(double *P, int nP_max, double x0[14]);
 
 /* the rocket's air vector for altitude h from ISA, with the given winds */
 void bsim_isa_rocket_air(double h, const double wind_i[3], const double gust_b[3], double air[9]);
+
+/* ---- hydraulic TVC (force_models/tvc_model.hpp, the Ember TVC actuator notes) ----
+ * four hydraulic pistons swing the nozzle. it keeps no state: the 12 states live with the caller
+ * (a Unit Delay in simulink), and bsim_tvc_step moves them on by dt, sub stepping the stiff
+ * hydraulics at its own small step inside                                                     */
+#define BSIM_TVC_NX 12   /* [delta (2) | delta_dot (2) | P_L (4) | u_v (4)] */
+#define BSIM_TVC_NP 23   /* every TvcParams field in order, see BSIM_TVC_FIELDS in bridge.hpp */
+#define BSIM_TVC_NOUT 18
+/*   [0]  delta (2)       where the nozzle is [rad]
+ *   [2]  delta_dot (2)   [rad/s]
+ *   [4]  delta_ddot (2)  [rad/s^2] (from bsim_tvc_step: the average over the step, which is what
+ *                        the rocket's tail wags dog term wants)
+ *   [6]  l (4)           piston lengths [m]
+ *   [10] l_cmd (4)       what each piston is being asked for [m]
+ *   [14] F (4)           piston forces [N]                                                   */
+
+/* the placeholder Ember TVC, with the example rocket's engine as the nozzle */
+void bsim_tvc_ember(double P[23]);
+
+/* moves the TVC on by dt with the inputs held: the gimbal command [rad], the vehicle's load on the
+ * nozzle [N m] (the rocket terms' nozzle_load) and the thrust [N] (for the thrust offset) */
+void bsim_tvc_step(const double P[23], const double s0[12], const double delta_cmd[2],
+                   const double load[2], double thrust, double dt, double s1[12], double out[18]);
+
+/* the 12 state derivatives (for analysis, simulations use bsim_tvc_step) */
+void bsim_tvc_xdot(const double P[23], const double s[12], const double delta_cmd[2],
+                   const double load[2], double thrust, double sdot[12], double out[18]);
+
+/* piston lengths [m] and the jacobian l_dot = J delta_dot (4 x 2, column major) at delta */
+void bsim_tvc_kinematics(const double P[23], const double delta[2], double l[4], double J[8]);
+
+/* gimbal angles from four measured piston lengths (gauss newton from delta0),
+ * returns the leftover length misfit [m] (big means a bad sensor) */
+double bsim_tvc_forward_kinematics(const double P[23], const double l[4], const double delta0[2],
+                                   double delta[2]);
 
 /* ---- atmosphere ---- */
 

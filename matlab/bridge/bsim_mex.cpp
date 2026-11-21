@@ -12,15 +12,18 @@
 //   P          = bsim_mex('spacecraft_pack', S)
 //   S          = bsim_mex('spacecraft_unpack', P)
 //   xd         = bsim_mex('spacecraft_xdot', P, x, throttle, wheel_torque)
-//   [S, x0, act] = bsim_mex('rocket_params', 'example')                 (act: actuator numbers)
-//   P          = bsim_mex('rocket_pack', S)
-//   S          = bsim_mex('rocket_unpack', P)
-//   [xd, terms, tv] = bsim_mex('rocket_xdot', P, x, u, air, t)          (terms struct, tv flat)
-//   air        = bsim_mex('isa_rocket_air', h, wind_i, gust_b)
-//   [T, p, rho, a] = bsim_mex('isa', h)                                 (h can be any size)
-//   air        = bsim_mex('isa_air', h, wind_i, gust_b)
-//   yq         = bsim_mex('lookup1', x, y, xq)                          (xq can be any size)
-//   zq         = bsim_mex('lookup2', x, y, Z, xq, yq)                   (Z is numel(x) by numel(y))
+//   [S, x0, act] = bsim_mex('rocket_params', 'example')                 (act: the fin servo
+//   numbers) T          = bsim_mex('tvc_params', 'ember')                        hydraulic TVC
+//   struct P          = bsim_mex('tvc_pack', T)          T = bsim_mex('tvc_unpack', P) [s1, o, ov]
+//   = bsim_mex('tvc_step', P, s0, delta_cmd, load, thrust, dt) [sd, o, ov] = bsim_mex('tvc_xdot',
+//   P, s, delta_cmd, load, thrust) [l, J]     = bsim_mex('tvc_kinematics', P, delta) [delta, res] =
+//   bsim_mex('tvc_fk', P, l, delta0) P          = bsim_mex('rocket_pack', S) S          =
+//   bsim_mex('rocket_unpack', P) [xd, terms, tv] = bsim_mex('rocket_xdot', P, x, u, air, t) (terms
+//   struct, tv flat) air        = bsim_mex('isa_rocket_air', h, wind_i, gust_b) [T, p, rho, a] =
+//   bsim_mex('isa', h)                                 (h can be any size) air        =
+//   bsim_mex('isa_air', h, wind_i, gust_b) yq         = bsim_mex('lookup1', x, y, xq) (xq can be
+//   any size) zq         = bsim_mex('lookup2', x, y, Z, xq, yq)                   (Z is numel(x) by
+//   numel(y))
 //
 // wherever P is taken it can be the struct or the packed vector (packed skips the conversion, so
 // it's the one to use inside loops)
@@ -369,7 +372,7 @@ mxArray *rocket_struct(const RocketDef &d) {
 
     const RocketEngine &e = p.engine;
     mxArray *eng = struct_of({"kind", "thrust_curve", "c_eff", "p_test", "T_vac_max", "Isp_vac",
-                              "throttle_min", "A_e", "x_G", "L_n"});
+                              "throttle_min", "A_e", "x_G", "L_n", "m_n", "l_n", "I_na", "I_nt"});
     mxSetField(eng, 0, "kind",
                mxCreateString(e.kind == RocketEngine::Kind::ThrustCurve ? "thrust_curve"
                                                                         : "throttleable"));
@@ -382,6 +385,10 @@ mxArray *rocket_struct(const RocketDef &d) {
     mxSetField(eng, 0, "A_e", scalar(e.A_e));
     mxSetField(eng, 0, "x_G", scalar(e.x_G));
     mxSetField(eng, 0, "L_n", scalar(e.L_n));
+    mxSetField(eng, 0, "m_n", scalar(e.m_n));
+    mxSetField(eng, 0, "l_n", scalar(e.l_n));
+    mxSetField(eng, 0, "I_na", scalar(e.I_na));
+    mxSetField(eng, 0, "I_nt", scalar(e.I_nt));
 
     const auto n_comp = static_cast<mwSize>(p.components.size());
     mxArray *comp = struct_of({"CN_alpha", "x_cp"}, n_comp);
@@ -486,7 +493,7 @@ RocketDef rocket_from_struct(const mxArray *s) {
     const mxArray *eng = get_field(s, "engine");
     check_fields(eng,
                  {"kind", "thrust_curve", "c_eff", "p_test", "T_vac_max", "Isp_vac", "throttle_min",
-                  "A_e", "x_G", "L_n"},
+                  "A_e", "x_G", "L_n", "m_n", "l_n", "I_na", "I_nt"},
                  "engine");
     RocketEngine &e = p.engine;
     const std::string kind = get_string(get_field(eng, "kind"), "engine kind");
@@ -505,6 +512,10 @@ RocketDef rocket_from_struct(const mxArray *s) {
     e.A_e = field_scalar(eng, "A_e");
     e.x_G = field_scalar(eng, "x_G");
     e.L_n = field_scalar(eng, "L_n");
+    e.m_n = field_scalar(eng, "m_n");
+    e.l_n = field_scalar(eng, "l_n");
+    e.I_na = field_scalar(eng, "I_na");
+    e.I_nt = field_scalar(eng, "I_nt");
 
     const mxArray *comp = get_field(s, "components");
     const std::size_t n_comp = struct_array(comp, {"CN_alpha", "x_cp"}, "components");
@@ -563,8 +574,10 @@ std::vector<double> rocket_P(const mxArray *a) {
 }
 
 mxArray *rocket_terms_struct(const double *t) {
-    mxArray *s = struct_of({"m", "x_cm", "Ix", "It", "T", "m_dot_e", "V", "mach", "qbar", "alpha_t",
-                            "F_body", "M_body", "F_aero", "M_aero", "g_i", "n_T", "rho_e", "v_r"});
+    mxArray *s =
+        struct_of({"m",    "x_cm", "Ix",      "It",     "T",        "m_dot_e", "V",
+                   "mach", "qbar", "alpha_t", "F_body", "M_body",   "F_aero",  "M_aero",
+                   "g_i",  "n_T",  "rho_e",   "v_r",    "M_gimbal", "hinge",   "nozzle_load"});
     const char *scalars[] = {"m",       "x_cm", "Ix",   "It",   "T",
                              "m_dot_e", "V",    "mach", "qbar", "alpha_t"};
     for (int k = 0; k < 10; k++) {
@@ -578,6 +591,58 @@ mxArray *rocket_terms_struct(const double *t) {
     mxSetField(s, 0, "n_T", column(t + 25, 3));
     mxSetField(s, 0, "rho_e", column(t + 28, 3));
     mxSetField(s, 0, "v_r", column(t + 31, 3));
+    mxSetField(s, 0, "M_gimbal", column(t + 34, 3));
+    mxSetField(s, 0, "hinge", column(t + 37, 2));
+    mxSetField(s, 0, "nozzle_load", column(t + 39, 2));
+    return s;
+}
+
+// --- tvc structs ---
+#define BSIM_FIELD_NAME(f) #f,
+const char *TVC_FIELDS[] = {BSIM_TVC_FIELDS(BSIM_FIELD_NAME)};
+#undef BSIM_FIELD_NAME
+constexpr int N_TVC_FIELDS = sizeof(TVC_FIELDS) / sizeof(TVC_FIELDS[0]);
+
+mxArray *tvc_struct(const TvcParams &p) {
+    mxArray *s = mxCreateStructMatrix(1, 1, N_TVC_FIELDS, TVC_FIELDS);
+#define BSIM_SET_FIELD(f) mxSetField(s, 0, #f, scalar(p.f));
+    BSIM_TVC_FIELDS(BSIM_SET_FIELD)
+#undef BSIM_SET_FIELD
+    return s;
+}
+
+// P as the struct (every field, nothing else) or the packed vector, packed into buf if a struct
+const double *tvc_P(const mxArray *a, double (&buf)[BSIM_TVC_NP]) {
+    if (!mxIsStruct(a)) {
+        return get_doubles(a, BSIM_TVC_NP, "P (the packed TVC)");
+    }
+    const int nf = mxGetNumberOfFields(a);
+    for (int k = 0; k < nf; k++) {
+        const char *name = mxGetFieldNameByNumber(a, k);
+        bool known = false;
+        for (const char *f : TVC_FIELDS) {
+            known = known || std::strcmp(name, f) == 0;
+        }
+        if (!known) {
+            throw Error(std::string("unknown TVC parameter '") + name + "'");
+        }
+    }
+    TvcParams p;
+#define BSIM_GET_FIELD(f) p.f = field_scalar(a, #f);
+    BSIM_TVC_FIELDS(BSIM_GET_FIELD)
+#undef BSIM_GET_FIELD
+    pack_tvc(p, buf);
+    return buf;
+}
+
+mxArray *tvc_out_struct(const double *o) {
+    mxArray *s = struct_of({"delta", "delta_dot", "delta_ddot", "l", "l_cmd", "F"});
+    mxSetField(s, 0, "delta", column(o, 2));
+    mxSetField(s, 0, "delta_dot", column(o + 2, 2));
+    mxSetField(s, 0, "delta_ddot", column(o + 4, 2));
+    mxSetField(s, 0, "l", column(o + 6, 4));
+    mxSetField(s, 0, "l_cmd", column(o + 10, 4));
+    mxSetField(s, 0, "F", column(o + 14, 4));
     return s;
 }
 
@@ -697,8 +762,7 @@ void dispatch(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         const RocketExample ex = rocket_example();
         plhs[0] = rocket_struct(ex.def);
         plhs[1] = column(ex.x0.state.data(), BSIM_ROCKET_NX);
-        mxArray *act = struct_of({"gimbal", "fin"});
-        mxSetField(act, 0, "gimbal", actuator_struct(ex.gimbal));
+        mxArray *act = struct_of({"fin"});
         mxSetField(act, 0, "fin", actuator_struct(ex.fin));
         plhs[2] = act;
 
@@ -716,10 +780,17 @@ void dispatch(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         check_args(nrhs, 6, cmd);
         const std::vector<double> P = rocket_P(prhs[1]);
         const int n_fins = unpack_rocket(P.data(), static_cast<int>(P.size())).params.fins.n;
-        const int nU = BSIM_ROCKET_NU(n_fins);
-        const std::string u_what = "u ([gimbal_p gimbal_y throttle t_ignition fins_deployed] + " +
-                                   std::to_string(n_fins) + " fins)";
-        const double *u = get_doubles(prhs[3], nU, u_what.c_str());
+        // with or without the gimbal's rates and accelerations on the end
+        const int nU = static_cast<int>(mxGetNumberOfElements(prhs[3]));
+        if (nU != BSIM_ROCKET_NU(n_fins) && nU != BSIM_ROCKET_NU_STILL(n_fins)) {
+            throw Error("u has to have " + std::to_string(BSIM_ROCKET_NU(n_fins)) +
+                        " entries ([gimbal_p gimbal_y throttle t_ignition fins_deployed | " +
+                        std::to_string(n_fins) +
+                        " fins | gimbal_p_dot gimbal_y_dot gimbal_p_ddot gimbal_y_ddot]), or " +
+                        std::to_string(BSIM_ROCKET_NU_STILL(n_fins)) +
+                        " without the gimbal's motion, not " + std::to_string(nU));
+        }
+        const double *u = get_doubles(prhs[3], 0, "u");
         double xd[BSIM_ROCKET_NX], terms[BSIM_ROCKET_NTERMS];
         bsim_rocket_xdot(
             P.data(), static_cast<int>(P.size()), get_doubles(prhs[2], BSIM_ROCKET_NX, "x"), u, nU,
@@ -734,6 +805,61 @@ void dispatch(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         bsim_isa_rocket_air(get_scalar(prhs[1], "h"), get_doubles(prhs[2], 3, "wind_i"),
                             get_doubles(prhs[3], 3, "gust_b"), air);
         plhs[0] = column(air, BSIM_ROCKET_AIR_N);
+
+    } else if (cmd == "tvc_params") {
+        check_args(nrhs, 2, cmd);
+        const std::string name = get_string(prhs[1], "the TVC");
+        if (name != "ember") {
+            throw Error("no TVC called '" + name + "' (there's ember)");
+        }
+        double P[BSIM_TVC_NP];
+        bsim_tvc_ember(P);
+        plhs[0] = tvc_struct(unpack_tvc(P));
+
+    } else if (cmd == "tvc_pack") {
+        check_args(nrhs, 2, cmd);
+        double buf[BSIM_TVC_NP];
+        plhs[0] = column(tvc_P(prhs[1], buf), BSIM_TVC_NP);
+
+    } else if (cmd == "tvc_unpack") {
+        check_args(nrhs, 2, cmd);
+        double buf[BSIM_TVC_NP];
+        plhs[0] = tvc_struct(unpack_tvc(tvc_P(prhs[1], buf)));
+
+    } else if (cmd == "tvc_step" || cmd == "tvc_xdot") {
+        const bool step = cmd == "tvc_step";
+        check_args(nrhs, step ? 7 : 6, cmd);
+        double buf[BSIM_TVC_NP];
+        const double *P = tvc_P(prhs[1], buf);
+        const double *s = get_doubles(prhs[2], BSIM_TVC_NX, "the TVC state (12)");
+        const double *cmd_ = get_doubles(prhs[3], 2, "delta_cmd");
+        const double *load = get_doubles(prhs[4], 2, "load");
+        const double thrust = get_scalar(prhs[5], "thrust");
+        double s_out[BSIM_TVC_NX], out[BSIM_TVC_NOUT];
+        if (step) {
+            bsim_tvc_step(P, s, cmd_, load, thrust, get_scalar(prhs[6], "dt"), s_out, out);
+        } else {
+            bsim_tvc_xdot(P, s, cmd_, load, thrust, s_out, out);
+        }
+        plhs[0] = column(s_out, BSIM_TVC_NX);
+        plhs[1] = tvc_out_struct(out);
+        plhs[2] = column(out, BSIM_TVC_NOUT);
+
+    } else if (cmd == "tvc_kinematics") {
+        check_args(nrhs, 3, cmd);
+        double buf[BSIM_TVC_NP], l[4], J[8];
+        bsim_tvc_kinematics(tvc_P(prhs[1], buf), get_doubles(prhs[2], 2, "delta"), l, J);
+        plhs[0] = column(l, 4);
+        plhs[1] = matrix(J, 4, 2);
+
+    } else if (cmd == "tvc_fk") {
+        check_args(nrhs, 4, cmd);
+        double buf[BSIM_TVC_NP], d[2];
+        const double res = bsim_tvc_forward_kinematics(
+            tvc_P(prhs[1], buf), get_doubles(prhs[2], 4, "l (4 piston lengths)"),
+            get_doubles(prhs[3], 2, "delta0"), d);
+        plhs[0] = column(d, 2);
+        plhs[1] = scalar(res);
 
     } else if (cmd == "isa") {
         check_args(nrhs, 2, cmd);

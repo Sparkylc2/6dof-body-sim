@@ -118,7 +118,7 @@ void pack_spacecraft(const SpacecraftDef &d, double *P) {
 // --- rocket ---
 namespace {
 
-constexpr int RK_ENGINE = 9, RK_FINS = 18, RK_ENV = 25, RK_COUNTS = 30;
+constexpr int RK_ENGINE = 9, RK_FINS = 22, RK_ENV = 29, RK_COUNTS = 34;
 constexpr int RK_PROPELLANT_N = 6, RK_COMPONENT_N = 2, RK_SLICE_N = 3;
 static_assert(RK_COUNTS + 7 == BSIM_ROCKET_NP_HEAD, "BSIM_ROCKET_NP_HEAD in bsim_c.h is wrong");
 
@@ -189,6 +189,10 @@ std::vector<double> pack_rocket(const RocketDef &d) {
     E[6] = e.A_e;
     E[7] = e.x_G;
     E[8] = e.L_n;
+    E[9] = e.m_n;
+    E[10] = e.l_n;
+    E[11] = e.I_na;
+    E[12] = e.I_nt;
 
     double *F = P.data() + RK_FINS;
     F[0] = p.fins.n;
@@ -277,6 +281,10 @@ RocketDef unpack_rocket(const double *P, int nP) {
     e.A_e = E[6];
     e.x_G = E[7];
     e.L_n = E[8];
+    e.m_n = E[9];
+    e.l_n = E[10];
+    e.I_na = E[11];
+    e.I_nt = E[12];
 
     const double *F = P + RK_FINS;
     p.fins.n = whole(F[0], "fins.n");
@@ -343,12 +351,12 @@ RocketExample rocket_example() {
     RocketExample ex;
     ex.def = {r.params, r.env};
     ex.x0 = r.state;
-    ex.gimbal = r.gimbal_p;
     ex.fin = r.fins.empty() ? Actuator{} : r.fins.front();
+    ex.tvc = r.tvc;
     return ex;
 }
 
-RocketControls unpack_rocket_controls(const double *u, int n_fins) {
+RocketControls unpack_rocket_controls(const double *u, int n_fins, bool with_motion) {
     RocketControls c;
     c.gimbal_p = u[0];
     c.gimbal_y = u[1];
@@ -356,6 +364,13 @@ RocketControls unpack_rocket_controls(const double *u, int n_fins) {
     c.t_ignition = u[3];
     c.grid_fins_deployed = u[4] != 0.0;
     c.fins.assign(u + 5, u + 5 + n_fins);
+    if (with_motion) {
+        const double *g = u + 5 + n_fins;
+        c.gimbal_p_dot = g[0];
+        c.gimbal_y_dot = g[1];
+        c.gimbal_p_ddot = g[2];
+        c.gimbal_y_ddot = g[3];
+    }
     return c;
 }
 
@@ -367,6 +382,31 @@ RocketAir unpack_rocket_air(const double *air) {
     a.wind_i = Map<const Vector3d>(air + 3);
     a.gust_b = Map<const Vector3d>(air + 6);
     return a;
+}
+
+// --- tvc ---
+#define BSIM_COUNT_FIELD(f) +1
+constexpr int TVC_PARAM_COUNT = 0 BSIM_TVC_FIELDS(BSIM_COUNT_FIELD);
+#undef BSIM_COUNT_FIELD
+static_assert(sizeof(TvcParams) == TVC_PARAM_COUNT * sizeof(double),
+              "TvcParams changed, update BSIM_TVC_FIELDS in bridge.hpp");
+static_assert(TVC_PARAM_COUNT == BSIM_TVC_NP, "BSIM_TVC_NP in bsim_c.h is out of date");
+static_assert(TVC_NX == BSIM_TVC_NX, "BSIM_TVC_NX in bsim_c.h is out of date");
+
+TvcParams unpack_tvc(const double *P) {
+    TvcParams p;
+    int i = 0;
+#define BSIM_UNPACK_FIELD(f) p.f = P[i++];
+    BSIM_TVC_FIELDS(BSIM_UNPACK_FIELD)
+#undef BSIM_UNPACK_FIELD
+    return p;
+}
+
+void pack_tvc(const TvcParams &p, double *P) {
+    int i = 0;
+#define BSIM_PACK_FIELD(f) P[i++] = p.f;
+    BSIM_TVC_FIELDS(BSIM_PACK_FIELD)
+#undef BSIM_PACK_FIELD
 }
 
 // --- air ---
@@ -500,7 +540,7 @@ int bsim_spacecraft_cubesat(double *P, int nP_max, double x0[17]) {
 }
 
 int bsim_rocket_xdot(const double *P, int nP, const double x[14], const double *u, int nU,
-                     const double air[9], double t, double xdot[14], double terms[34]) {
+                     const double air[9], double t, double xdot[14], double terms[41]) {
     RocketDef d;
     try {
         d = unpack_rocket(P, nP);
@@ -509,7 +549,8 @@ int bsim_rocket_xdot(const double *P, int nP, const double x[14], const double *
         std::fill(terms, terms + BSIM_ROCKET_NTERMS, std::nan(""));
         return -1;
     }
-    if (nU != BSIM_ROCKET_NU(d.params.fins.n)) {
+    const int n_fins = d.params.fins.n;
+    if (nU != BSIM_ROCKET_NU(n_fins) && nU != BSIM_ROCKET_NU_STILL(n_fins)) {
         std::fill(xdot, xdot + BSIM_ROCKET_NX, std::nan(""));
         std::fill(terms, terms + BSIM_ROCKET_NTERMS, std::nan(""));
         return -1;
@@ -518,9 +559,9 @@ int bsim_rocket_xdot(const double *P, int nP, const double x[14], const double *
     RocketState s;
     s.state = Map<const StateVector<14>>(x);
     RocketTerms T;
-    Map<StateVector<14>>{xdot} =
-        rocket_derivatives(d.params, d.env, unpack_rocket_controls(u, d.params.fins.n),
-                           unpack_rocket_air(air), s, t, &T);
+    Map<StateVector<14>>{xdot} = rocket_derivatives(
+        d.params, d.env, unpack_rocket_controls(u, n_fins, nU == BSIM_ROCKET_NU(n_fins)),
+        unpack_rocket_air(air), s, t, &T);
 
     terms[0] = T.mp.m;
     terms[1] = T.mp.x_cm;
@@ -540,6 +581,9 @@ int bsim_rocket_xdot(const double *P, int nP, const double x[14], const double *
     Map<Vector3d>(terms + 25) = T.engine.n_T;
     Map<Vector3d>(terms + 28) = T.engine.rho_e;
     Map<Vector3d>(terms + 31) = T.air.v_r;
+    Map<Vector3d>(terms + 34) = T.gimbal.M();
+    Map<Eigen::Vector2d>(terms + 37) = T.hinge;
+    Map<Eigen::Vector2d>(terms + 39) = T.nozzle_load;
     return 0;
 }
 
@@ -561,6 +605,65 @@ void bsim_isa_rocket_air(double h, const double wind_i[3], const double gust_b[3
     air[2] = atm.p;
     std::copy(wind_i, wind_i + 3, air + 3);
     std::copy(gust_b, gust_b + 3, air + 6);
+}
+
+} // extern "C"
+
+// (c++ helpers for the tvc functions below, outside the extern "C" block)
+namespace {
+
+TvcInputs tvc_inputs(const double *delta_cmd, const double *load, double thrust) {
+    TvcInputs in;
+    in.delta_cmd = Map<const Eigen::Vector2d>(delta_cmd);
+    in.load = Map<const Eigen::Vector2d>(load);
+    in.thrust = thrust;
+    return in;
+}
+
+void tvc_outputs(const TvcState &s, const TvcOutputs &o, double *out) {
+    Map<Eigen::Vector4d>{out} = s.segment<4>(0); // delta, delta_dot
+    Map<Eigen::Vector2d>(out + 4) = o.delta_ddot;
+    Map<Eigen::Vector4d>(out + 6) = o.l;
+    Map<Eigen::Vector4d>(out + 10) = o.l_cmd;
+    Map<Eigen::Vector4d>(out + 14) = o.F;
+}
+
+} // namespace
+
+extern "C" {
+
+void bsim_tvc_ember(double P[23]) { pack_tvc(rocket_example().tvc, P); }
+
+void bsim_tvc_step(const double P[23], const double s0[12], const double delta_cmd[2],
+                   const double load[2], double thrust, double dt, double s1[12], double out[18]) {
+    const TvcState s = Map<const TvcState>(s0);
+    TvcOutputs o;
+    const TvcState next = tvc_step(unpack_tvc(P), s, tvc_inputs(delta_cmd, load, thrust), dt, &o);
+    Map<TvcState>{s1} = next;
+    tvc_outputs(next, o, out);
+}
+
+void bsim_tvc_xdot(const double P[23], const double s[12], const double delta_cmd[2],
+                   const double load[2], double thrust, double sdot[12], double out[18]) {
+    const TvcState x = Map<const TvcState>(s);
+    TvcOutputs o;
+    Map<TvcState>{sdot} =
+        tvc_derivatives(unpack_tvc(P), x, tvc_inputs(delta_cmd, load, thrust), &o);
+    tvc_outputs(x, o, out);
+}
+
+void bsim_tvc_kinematics(const double P[23], const double delta[2], double l[4], double J[8]) {
+    const TvcKinematics k = tvc_kinematics(unpack_tvc(P), Map<const Eigen::Vector2d>(delta));
+    Map<Eigen::Vector4d>{l} = k.l;
+    Map<Matrix42d>{J} = k.J;
+}
+
+double bsim_tvc_forward_kinematics(const double P[23], const double l[4], const double delta0[2],
+                                   double delta[2]) {
+    double res = 0.0;
+    Map<Eigen::Vector2d>{delta} = tvc_forward_kinematics(
+        unpack_tvc(P), Map<const Eigen::Vector4d>(l), Map<const Eigen::Vector2d>(delta0), 5, &res);
+    return res;
 }
 
 void bsim_isa(double h, double out[4]) {

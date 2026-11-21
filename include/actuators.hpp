@@ -20,6 +20,8 @@ struct Actuator {
 
     double pos = 0.0;  // where the surface actually is
     double rate = 0.0; // how fast it's moving
+    double acc = 0.0;  // its average acceleration over the last step (the rocket's gimbal dynamics
+                       // use it for the tail wags dog reaction)
 
     // holds cmd over dt and moves the surface, returns the new pos
     // (sub steps internally, gotta love stiffness)
@@ -27,6 +29,10 @@ struct Actuator {
 
     // puts the surface at pos, at rest
     void reset(double p = 0.0);
+
+  private:
+    double step_motion(double cmd, double dt); // the step itself, step() adds acc around it
+  public:
 
     bool ideal() const { return kind == Kind::Ideal; }
 };

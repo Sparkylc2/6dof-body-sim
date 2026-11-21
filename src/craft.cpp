@@ -203,8 +203,14 @@ double actual(const Actuator &a, double cmd) { return a.ideal() ? cmd : a.pos; }
 } // namespace
 
 void Rocket::step_actuators(double dt) {
-    gimbal_p.step(commands.gimbal_p, dt);
-    gimbal_y.step(commands.gimbal_y, dt);
+    TvcInputs in;
+    in.delta_cmd << commands.gimbal_p, commands.gimbal_y;
+    in.load = tvc_load;
+    in.thrust = tvc_thrust;
+    const Eigen::Vector2d rate_before = tvc_state.segment<2>(2);
+    tvc_state = tvc_step(tvc, tvc_state, in, dt);
+    tvc_accel = dt > 0.0 ? Eigen::Vector2d((tvc_state.segment<2>(2) - rate_before) / dt)
+                         : Eigen::Vector2d::Zero();
 
     for (size_t k = 0; k < fins.size() && k < commands.fins.size(); k++) {
         fins[k].step(commands.grid_fins_deployed ? commands.fins[k] : 0.0, dt);
@@ -213,8 +219,14 @@ void Rocket::step_actuators(double dt) {
 
 RocketControls Rocket::controls() const {
     RocketControls u = commands;
-    u.gimbal_p = actual(gimbal_p, commands.gimbal_p);
-    u.gimbal_y = actual(gimbal_y, commands.gimbal_y);
+    // where the TVC actually has the engine, and how it's moving (for the swinging engine's
+    // dynamics in the plant)
+    u.gimbal_p = tvc_state(0);
+    u.gimbal_y = tvc_state(1);
+    u.gimbal_p_dot = tvc_state(2);
+    u.gimbal_y_dot = tvc_state(3);
+    u.gimbal_p_ddot = tvc_accel.x();
+    u.gimbal_y_ddot = tvc_accel.y();
 
     for (size_t k = 0; k < fins.size() && k < u.fins.size(); k++) {
         u.fins[k] = actual(fins[k], commands.grid_fins_deployed ? commands.fins[k] : 0.0);
@@ -274,6 +286,11 @@ Rocket generate_example_rocket() {
     e.x_G = x_tail + 0.5;
     e.L_n = 0.5;
     p.A_motor = e.A_e;
+
+    e.m_n = 6.0;
+    e.l_n = 0.2;
+    e.I_na = 0.5 * e.m_n * 0.06 * 0.06;
+    e.I_nt = e.m_n * 0.5 * 0.5 / 12.0;
 
     // --- aero ---
     // the nose is the only barrowman component (CN_alpha = 2, cp 0.696 m back from the tip, both
@@ -342,13 +359,10 @@ Rocket generate_example_rocket() {
     p.fins.CD0 = 1.2;      // TODO: placeholder
 
     // --- actuators ---
-    for (Actuator *g : {&r.gimbal_p, &r.gimbal_y}) {
-        g->kind = Actuator::Kind::SecondOrder;
-        g->wn = 40.0;
-        g->zeta = 0.7;
-        g->rate_max = 60.0 * DEG_;
-        g->pos_max = 8.0 * DEG_;
-    }
+    // the hydraulic TVC swinging the engine (placeholder geometry and hydraulics from the Ember
+    // TVC actuator notes, the nozzle is the engine above)
+    r.tvc = tvc_params_for(e);
+    r.tvc_state = tvc_rest();
 
     r.fins.resize(static_cast<size_t>(p.fins.n));
     for (Actuator &f : r.fins) {

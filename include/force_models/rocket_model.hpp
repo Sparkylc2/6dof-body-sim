@@ -61,6 +61,14 @@ struct RocketEngine {
     double A_e = 0.0; // nozzle exit area [m^2]
     double x_G = 0.0; // gimbal pivot station [m]
     double L_n = 0.0; // pivot to nozzle exit plane, along the nozzle [m]
+
+    // the part that swings on the gimbal (N in the TVC notes, section 09), see tvc_model.hpp
+    // it's already counted in the dry mass at delta = 0, these are only for what changes when it
+    // swings. m_n = 0 is the massless nozzle
+    double m_n = 0.0;  // its mass [kg]
+    double l_n = 0.0;  // its cm behind the pivot, along the nozzle [m]
+    double I_na = 0.0; // its inertia about its own axis, about its cm [kg m^2]
+    double I_nt = 0.0; // its transverse inertia about its cm [kg m^2]
 };
 
 // --- aero ---
@@ -135,6 +143,10 @@ struct RocketParams {
 struct RocketControls {
     double gimbal_p = 0.0;           // pitch gimbal [rad], + gives a nose up (+q) moment
     double gimbal_y = 0.0;           // yaw gimbal [rad], + gives a nose right (+r) moment
+    double gimbal_p_dot = 0.0;       // how fast the gimbal is moving [rad/s] (from the servos,
+    double gimbal_y_dot = 0.0;       //  only the gimbal dynamics use these and the accelerations)
+    double gimbal_p_ddot = 0.0;      // [rad/s^2]
+    double gimbal_y_ddot = 0.0;
     double throttle = 0.0;           // [0, 1] (throttleable engines)
     double t_ignition = NEVER;       // sim time the motor was lit (thrust curve engines)
     std::vector<double> fins;        // grid fin deflections [rad], one per fin
@@ -241,6 +253,21 @@ Wrench rocket_aero(const RocketParams &p, const RocketControls &u, const RocketA
 // falls off w alt h = -pd
 Vector3d rocket_gravity(double h);
 
+// --- gimbal dynamics ---
+// every moment the swinging gimbal mass adds, from rocket_gimbal_dynamics (tvc_model.hpp)
+using Matrix32d = Eigen::Matrix<double, 3, 2>;
+struct GimbalDynamics {
+    Matrix3d dJ = Matrix3d::Zero();      // J(m, delta) - J(m, 0)
+    Matrix32d B = Matrix32d::Zero();
+    Vector3d H_rel = Vector3d::Zero();   // B delta_dot
+    Vector3d M_twd = Vector3d::Zero();   // -B delta_ddot
+    Vector3d M_cor = Vector3d::Zero();   // -w x B delta_dot - (dJ/ddelta delta_dot) w
+    Vector3d M_geom = Vector3d::Zero();  // -B_dot delta_dot - (dJ/dx_cm x_cm_dot) w
+    Vector3d M_exit = Vector3d::Zero();  // -m_dot_e rho_e x rho_e_dot
+
+    Vector3d M() const { return M_twd + M_cor + M_geom + M_exit; }
+};
+
 // --- everything ---
 // every term in the equations of motion (body frame unless it says otherwise), for
 // logging/accelerometer model
@@ -254,11 +281,18 @@ struct RocketTerms {
     Vector3d M_jet = Vector3d::Zero();   // -m_dot_e rho_e x (w x rho_e)
     Vector3d M_J_dot = Vector3d::Zero(); // -J_dot w
     Vector3d g_i = Vector3d::Zero();     // gravity (NED)
+    GimbalDynamics gimbal;               // the swinging gimbal mass (zero with a massless nozzle)
+    Eigen::Vector2d hinge = Eigen::Vector2d::Zero(); // servo hinge torques [pitch, yaw] [N m]
+    Eigen::Vector2d nozzle_load = Eigen::Vector2d::Zero(); // the vehicle's load on the nozzle,
+                                                           // the TVC's TvcInputs::load [N m]
+                                                     // (filled in by rocket_derivatives)
 
     // total non gravitational force, what an accelerometer at the cm reads times m
     Vector3d F_body() const { return engine.wrench.F + aero.F + F_cor; }
     // total moment about the cm
-    Vector3d M_body() const { return engine.wrench.M + aero.M + M_jet + M_J_dot; }
+    Vector3d M_body() const { return engine.wrench.M + aero.M + M_jet + M_J_dot + gimbal.M(); }
+    // inertia about the cm with the gimbal where it is
+    Matrix3d J() const { return mp.J() + gimbal.dJ; }
 };
 
 RocketTerms rocket_terms(const RocketParams &p, const RocketEnvironment &env,

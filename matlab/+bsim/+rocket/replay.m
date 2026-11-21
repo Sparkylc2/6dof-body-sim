@@ -177,10 +177,11 @@ if ~isstruct(Ps)
 end
 t = xs.Time;
 X = rows(xs.Data, 14);
-TV = on_times(ts.Time, rows(ts.Data, 34), t);
+TV = on_times(ts.Time, by_time(ts.Data, numel(ts.Time)), t);
 Um = [];
 if ~isempty(us)
-    Um = on_times(us.Time, rows(us.Data, 5 + Ps.fins.n), t);
+    % (5 + fins or 9 + fins wide, with the gimbal's motion on the end)
+    Um = on_times(us.Time, by_time(us.Data, numel(us.Time)), t);
 end
 end
 
@@ -201,6 +202,14 @@ p.addParameter('GimbalExaggeration', 1);
 p.addParameter('Autoplay', true);
 p.parse(args{:});
 opts = p.Results;
+end
+
+% one row per time step, whatever width the signal is
+function A = by_time(D, n_t)
+A = squeeze(D);
+if size(A, 1) ~= n_t
+    A = A.';
+end
 end
 
 % Timeseries data comes out as N x n or n x 1 x N depending on the signal

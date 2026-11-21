@@ -5,6 +5,13 @@
 namespace BSIM {
 
 double Actuator::step(double cmd, double dt) {
+    const double rate_before = rate;
+    const double out = step_motion(cmd, dt);
+    acc = dt > 0.0 ? (rate - rate_before) / dt : 0.0;
+    return out;
+}
+
+double Actuator::step_motion(double cmd, double dt) {
     switch (kind) {
     case Kind::Ideal:
         rate = (std::clamp(cmd, -pos_max, pos_max) - pos) / dt;
@@ -48,6 +55,7 @@ double Actuator::step(double cmd, double dt) {
 void Actuator::reset(double p) {
     pos = p;
     rate = 0.0;
+    acc = 0.0;
 }
 
 } // namespace BSIM

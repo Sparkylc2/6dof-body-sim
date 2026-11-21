@@ -144,7 +144,8 @@ verifyLessThan(tc, xd(6), 0); % going up
 
 verifyEqual(tc, tv, [terms.m; terms.x_cm; terms.Ix; terms.It; terms.T; terms.m_dot_e; ...
     terms.V; terms.mach; terms.qbar; terms.alpha_t; terms.F_body; terms.M_body; ...
-    terms.F_aero; terms.M_aero; terms.g_i; terms.n_T; terms.rho_e; terms.v_r]);
+    terms.F_aero; terms.M_aero; terms.g_i; terms.n_T; terms.rho_e; terms.v_r; terms.M_gimbal; ...
+    terms.hinge; terms.nozzle_load]);
 verifyEqual(tc, terms.n_T, [1; 0; 0]);
 end
 
@@ -159,6 +160,60 @@ tc.addTeardown(@() close(s.Fig));
 s.update(0, x0, terms);
 s.update(0.1, x0, terms);
 verifyTrue(tc, isvalid(s.Fig));
+end
+
+% the gimbal's motion on the end of u feeds the swinging engine: accelerating it in pitch
+% kicks the airframe the other way (tail wags dog), and leaving it off means standing still
+function test_rocket_gimbal_motion(tc)
+[P, x0] = bsim.rocket.params('example');
+p = bsim.rocket.pack(P);
+air = bsim.rocket.air(0);
+u_still = [0; 0; 1; Inf; 0; zeros(P.fins.n, 1)];
+u_moving = [u_still; 0; 0; 40; 0];   % gimbal pitch accelerating at 40 rad/s^2
+[xd0, T0] = bsim.rocket.xdot(p, x0, u_still, air, 0);
+[xd1, T1] = bsim.rocket.xdot(p, x0, u_moving, air, 0);
+verifyEqual(tc, bsim.rocket.xdot(p, x0, [u_still; 0; 0; 0; 0], air, 0), xd0);
+verifyEqual(tc, T0.M_gimbal, zeros(3, 1));
+e = P.engine;
+I_twd = e.I_nt + e.m_n * e.l_n^2 + e.m_n * e.l_n * (T1.x_cm - e.x_G);
+verifyEqual(tc, T1.M_gimbal(2), I_twd * 40, 'RelTol', 1e-9);
+verifyGreaterThan(tc, xd1(12), xd0(12)); % reaction pitches the airframe the same way (+q)
+verifyGreaterThan(tc, T1.hinge(1), 0);    % and the servo pushes the way it's swinging it
+verifyError(tc, @() bsim.rocket.xdot(p, x0, [u_still; 0], air, 0), 'bsim:error');
+end
+
+% --- hydraulic tvc ---
+function test_tvc_round_trip_and_kinematics(tc)
+T = bsim.tvc.params('ember');
+p = bsim.tvc.pack(T);
+verifySize(tc, p, [23 1]);
+verifyEqual(tc, bsim.tvc.unpack(p), T);
+[S] = bsim.rocket.params('example');
+verifyEqual(tc, [T.m_n T.l_n T.I_na T.I_nt], [S.engine.m_n S.engine.l_n S.engine.I_na S.engine.I_nt]);
+% the TVC notes: every piston 265.7 mm straight, 0.126 m/rad arms, pitch on pistons 1 and 3
+[l, J] = bsim.tvc.kinematics(p, [0; 0]);
+verifyEqual(tc, l, 0.2657 * ones(4, 1), 'AbsTol', 1e-4);
+verifyEqual(tc, J, [0 -0.126; 0.126 0; 0 0.126; -0.126 0], 'AbsTol', 1e-3);
+% four lengths back to the angles
+d = deg2rad([5; -3]);
+[back, res] = bsim.tvc.fk(p, bsim.tvc.kinematics(p, d));
+verifyEqual(tc, back, d, 'AbsTol', 1e-10);
+verifyLessThan(tc, res, 1e-12);
+T.bogus = 1;
+verifyError(tc, @() bsim.tvc.pack(T), 'bsim:error');
+end
+
+% an 8 deg step slews at about v0 / arm = 91 deg/s and arrives (the TVC notes, figure 11)
+function test_tvc_step_response(tc)
+p = bsim.tvc.pack(bsim.tvc.params('ember'));
+s = zeros(12, 1); dt = 1e-3; d = zeros(400, 1);
+for k = 1:400
+    [s, out] = bsim.tvc.step(p, s, [deg2rad(8); 0], [0; 0], 0, dt);
+    d(k) = s(1);
+end
+verifyEqual(tc, rad2deg(max(diff(d)) / dt), 91, 'AbsTol', 6);
+verifyEqual(tc, rad2deg(d(end)), 8, 'AbsTol', 0.05);
+verifyEqual(tc, out.delta, s(1:2));
 end
 
 function test_rocket_air_layout(tc)

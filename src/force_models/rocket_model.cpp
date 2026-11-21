@@ -1,4 +1,5 @@
 #include "force_models/rocket_model.hpp"
+#include "force_models/tvc_model.hpp"
 #include "atmosphere.hpp" // ISA_G0
 #include "frames.hpp"
 #include <algorithm>
@@ -338,6 +339,17 @@ RocketTerms rocket_terms(const RocketParams &p, const RocketEnvironment &env,
     if (env.gravity) {
         o.g_i = rocket_gravity(-x.pos().z());
     }
+
+    // the swinging gimbal mass (tvc_model.hpp), which needs how fast the cm is sliding
+    double x_cm_dot = 0.0;
+    if (p.engine.m_n > 0.0 && m_dot_e > 0.0) {
+        constexpr double EPS = 1e-3; // [kg]
+        const double lo = std::max(m - EPS, p.m_dry);
+        const double hi = m + EPS;
+        x_cm_dot = (rocket_mass_properties(p, hi).x_cm - rocket_mass_properties(p, lo).x_cm) /
+                   (hi - lo) * -m_dot_e;
+    }
+    o.gimbal = rocket_gimbal_dynamics(p, u, w, o.mp.x_cm, x_cm_dot, m_dot_e, rho_e);
 
     return o;
 }

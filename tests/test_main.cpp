@@ -9,6 +9,7 @@
 #include "dynamics.hpp"
 #include "force_models/fixed_wing_model.hpp"
 #include "frames.hpp"
+#include "force_models/tvc_model.hpp"
 #include "sensors.hpp"
 #include "tables.hpp"
 #include "world.hpp"
@@ -1659,7 +1660,10 @@ static void test_rocket_tvc_moment_signs() {
     const double l_g = T.mp.x_cm - r.params.engine.x_G;
     CHECK(xd(BSIM::IDX::RATES + 1) > 0.0);
     CHECK_NEAR(T.engine.wrench.M.y(), T.engine.T * l_g * std::sin(u.gimbal_p), 1e-9);
-    CHECK_NEAR(xd(BSIM::IDX::RATES + 1), T.engine.T * l_g * std::sin(u.gimbal_p) / T.mp.It, 1e-9);
+    // (the inertia with the swung engine where it is, J(m, delta), not just J(m))
+    const Eigen::Vector3d M_T(0.0, T.engine.T * l_g * std::sin(u.gimbal_p), 0.0);
+    CHECK_NEAR(xd(BSIM::IDX::RATES + 1), T.J().ldlt().solve(M_T).y(), 1e-9);
+    CHECK_NEAR(xd(BSIM::IDX::RATES + 1), T.engine.T * l_g * std::sin(u.gimbal_p) / T.mp.It, 1e-4);
 
     u.gimbal_p = 0.0;
     u.gimbal_y = 2.0 * R_DEG;
@@ -1667,6 +1671,262 @@ static void test_rocket_tvc_moment_signs() {
     CHECK(xd(BSIM::IDX::RATES + 2) > 0.0);
     CHECK_NEAR(T.engine.wrench.M.z(), T.engine.T * l_g * std::sin(u.gimbal_y), 1e-9);
     CHECK_NEAR(T.engine.wrench.M.x(), 0.0, 1e-12);
+}
+
+// --- gimbal dynamics (the swinging nozzle in tvc_model.hpp, TVC notes section 09) ---
+// I_twd from the notes' linear check: N's transverse inertia about the pivot plus the transport term
+static double rocket_I_twd(const RocketParams &p, double x_cm) {
+    const BSIM::RocketEngine &e = p.engine;
+    return e.I_nt + e.m_n * e.l_n * e.l_n + e.m_n * e.l_n * (x_cm - e.x_G);
+}
+
+// nothing swinging, or no mass to swing, adds nothing
+static void test_rocket_gimbal_massless_or_still_adds_nothing() {
+    Rocket r = BSIM::generate_example_rocket();
+    RocketEnvironment env;
+    RocketControls u = r.controls();
+    u.throttle = 1.0;
+    u.gimbal_p = 3.0 * R_DEG;
+    r.state.rates() << 0.2, -0.1, 0.3;
+    RocketTerms T;
+
+    // engine swung but not moving: only the inertia changes
+    BSIM::rocket_derivatives(r.params, env, u, rocket_vacuum(), r.state, 0.0, &T);
+    CHECK_NEAR(T.gimbal.M_twd.norm() + T.gimbal.M_exit.norm() + T.gimbal.H_rel.norm(), 0.0, 1e-12);
+    CHECK(T.gimbal.dJ.norm() > 0.0);
+
+    // massless nozzle, moving: only the exhaust being thrown sideways
+    RocketParams p = r.params;
+    p.engine.m_n = 0.0;
+    u.gimbal_p_dot = 0.5;
+    u.gimbal_p_ddot = 20.0;
+    BSIM::rocket_derivatives(p, env, u, rocket_vacuum(), r.state, 0.0, &T);
+    CHECK_NEAR((T.gimbal.M() - T.gimbal.M_exit).norm(), 0.0, 1e-12);
+    CHECK_NEAR(T.gimbal.dJ.norm(), 0.0, 1e-12);
+    CHECK(T.gimbal.M_exit.norm() > 0.0);
+}
+
+// notes step 7: pitch plane, no rotation, small angle, B_yp = -I_twd so the reaction is +I_twd ddot
+static void test_rocket_gimbal_tail_wags_dog() {
+    Rocket r = BSIM::generate_example_rocket();
+    RocketEnvironment env;
+    RocketControls u = r.controls();
+    RocketTerms T;
+    u.gimbal_p_ddot = 40.0;
+    u.gimbal_y_ddot = -25.0;
+    BSIM::rocket_derivatives(r.params, env, u, rocket_vacuum(), r.state, 0.0, &T);
+    const double I_twd = rocket_I_twd(r.params, T.mp.x_cm);
+    CHECK_NEAR(T.gimbal.B(1, 0), -I_twd, 1e-12);
+    CHECK_NEAR(T.gimbal.M_twd.y(), I_twd * 40.0, 1e-9);
+    CHECK_NEAR(T.gimbal.M_twd.z(), I_twd * -25.0, 1e-9);
+    CHECK_NEAR(T.gimbal.M_twd.x(), 0.0, 1e-12);
+    // and it beats the thrust moment above w_twd = sqrt(T l_g / I_twd)
+    CHECK(I_twd > 1.0 && I_twd < 10.0);
+}
+
+// rolling at p while swinging in pitch gives a yaw moment of 2 I_twd p delta_p_dot and no roll
+// (the two coriolis halves together, notes section 09, for a slender N)
+static void test_rocket_gimbal_coriolis_coupling() {
+    Rocket r = BSIM::generate_example_rocket();
+    r.params.engine.I_na = 0.0;
+    RocketEnvironment env;
+    RocketControls u = r.controls();
+    RocketTerms T;
+    const double p_roll = 0.7, rate = 1.3;
+    r.state.rates() << p_roll, 0.0, 0.0;
+    u.gimbal_p_dot = rate;
+    BSIM::rocket_derivatives(r.params, env, u, rocket_vacuum(), r.state, 0.0, &T);
+    const double I_twd = rocket_I_twd(r.params, T.mp.x_cm);
+    CHECK_NEAR(T.gimbal.M_cor.z(), 2.0 * I_twd * p_roll * rate, 1e-6);
+    CHECK_NEAR(T.gimbal.M_cor.x(), 0.0, 1e-9);
+}
+
+// with nothing outside acting on it, swinging the engine about can't change the total angular
+// momentum R (J(delta) w + B delta_dot), so this checks J_dot, B_dot and the coriolis terms
+static void test_rocket_gimbal_conserves_angular_momentum() {
+    Rocket r = BSIM::generate_example_rocket();
+    RocketEnvironment env;
+    env.gravity = env.aero = false;
+    const RocketAir air = rocket_vacuum();
+    RocketControls u0 = r.controls();
+    u0.throttle = 0.0;
+
+    // the gimbal swung about by hand: delta = A sin(W t + phase) on each axis
+    auto controls_at = [&](double t) {
+        RocketControls u = u0;
+        u.gimbal_p = 0.12 * std::sin(3.0 * t);
+        u.gimbal_p_dot = 0.36 * std::cos(3.0 * t);
+        u.gimbal_p_ddot = -1.08 * std::sin(3.0 * t);
+        u.gimbal_y = 0.09 * std::sin(5.0 * t + 0.4);
+        u.gimbal_y_dot = 0.45 * std::cos(5.0 * t + 0.4);
+        u.gimbal_y_ddot = -2.25 * std::sin(5.0 * t + 0.4);
+        return u;
+    };
+    auto H_inertial = [&](const RocketState &s, double t) {
+        RocketTerms T;
+        BSIM::rocket_derivatives(r.params, env, controls_at(t), air, s, t, &T);
+        return Eigen::Vector3d(BSIM::rotation(s.quat()) * (T.J() * s.rates() + T.gimbal.H_rel));
+    };
+
+    RocketState s = r.state;
+    s.rates() << 0.4, 0.2, -0.3;
+    const Eigen::Vector3d H0 = H_inertial(s, 0.0);
+    const double dt = 1e-3;
+    double t = 0.0;
+    for (int k = 0; k < 2000; k++) {
+        auto f = [&](const RocketState &x, double tt) {
+            return BSIM::rocket_derivatives(r.params, env, controls_at(tt), air, x, tt);
+        };
+        auto at = [](const RocketState &x, const RocketVec &d, double h) {
+            RocketState y = x;
+            y.state += h * d;
+            return y;
+        };
+        const RocketVec k1 = f(s, t);
+        const RocketVec k2 = f(at(s, k1, dt / 2), t + dt / 2);
+        const RocketVec k3 = f(at(s, k2, dt / 2), t + dt / 2);
+        const RocketVec k4 = f(at(s, k3, dt), t + dt);
+        s.state += dt / 6.0 * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+        s.quat().normalize();
+        t += dt;
+    }
+    CHECK_NEAR((H_inertial(s, t) - H0).norm() / H0.norm(), 0.0, 1e-7);
+}
+
+// holding the engine while the core pitches: the servo has to swing N with it, I_twd q_dot
+// (thrust runs through the pivot, so on its own it puts no load on the hinge)
+static void test_rocket_hinge_torque() {
+    Rocket r = BSIM::generate_example_rocket();
+    RocketEnvironment env;
+    env.gravity = false;
+    RocketControls u = r.controls();
+    u.throttle = 1.0;
+    RocketTerms T;
+
+    BSIM::rocket_derivatives(r.params, env, u, rocket_vacuum(), r.state, 0.0, &T);
+    CHECK_NEAR(T.hinge.norm(), 0.0, 1e-9); // straight thrust, nothing turning
+
+    u.gimbal_p = 2.0 * R_DEG;
+    const RocketVec xd = BSIM::rocket_derivatives(r.params, env, u, rocket_vacuum(), r.state, 0.0, &T);
+    const double q_dot = xd(BSIM::IDX::RATES + 1);
+    const double I_twd = rocket_I_twd(r.params, T.mp.x_cm);
+    CHECK(q_dot > 0.0);
+    CHECK_NEAR(T.hinge.x() / (-I_twd * q_dot), 1.0, 0.01);
+    CHECK_NEAR(T.hinge.y(), 0.0, 1e-9);
+}
+
+// --- hydraulic tvc (force_models/tvc_model.hpp), numbers from the Ember TVC actuator notes ---
+static BSIM::TvcParams tvc_example() {
+    return BSIM::tvc_params_for(BSIM::generate_example_rocket().params.engine);
+}
+
+// runs the actuator for T seconds at a 1 ms outer step, returns delta_p every step
+static std::vector<double> tvc_run(const BSIM::TvcParams &p, BSIM::TvcState &s,
+                                   const BSIM::TvcInputs &in, double T, double dt = 1e-3) {
+    std::vector<double> dp;
+    for (int i = 0; i < static_cast<int>(std::round(T / dt)); i++) {
+        s = BSIM::tvc_step(p, s, in, dt);
+        dp.push_back(s(0));
+    }
+    return dp;
+}
+
+// sections 03-04: straight length, moment arms, which piston does what, and the arm changing
+static void test_tvc_kinematics_match_notes() {
+    const BSIM::TvcParams p = tvc_example();
+    const BSIM::TvcKinematics k0 = BSIM::tvc_kinematics(p, Eigen::Vector2d::Zero());
+    for (int i = 0; i < 4; i++) {
+        CHECK_NEAR(k0.l(i), 0.2657, 1e-4);
+    }
+    BSIM::Matrix42d J_notes;
+    J_notes << 0, -0.126, 0.126, 0, 0, 0.126, -0.126, 0;
+    CHECK_NEAR((k0.J - J_notes).cwiseAbs().maxCoeff(), 0.0, 1e-3);
+
+    // pitched 8 deg: arms 117 and 135 mm, and the yaw pistons shorten 0.55 mm
+    const BSIM::TvcKinematics k8 = BSIM::tvc_kinematics(p, Eigen::Vector2d(8 * R_DEG, 0));
+    CHECK_NEAR(k8.J(1, 0), 0.117, 2e-3);
+    CHECK_NEAR(-k8.J(3, 0), 0.135, 2e-3);
+    CHECK_NEAR(k0.l(0) - k8.l(0), 0.55e-3, 0.05e-3);
+    CHECK_NEAR(k0.l(2) - k8.l(2), 0.55e-3, 0.05e-3);
+}
+
+// l_dot = J delta_dot, against finite differences of the lengths themselves
+static void test_tvc_jacobian_matches_finite_difference() {
+    const BSIM::TvcParams p = tvc_example();
+    const Eigen::Vector2d d(6 * R_DEG, -4 * R_DEG);
+    const BSIM::TvcKinematics k = BSIM::tvc_kinematics(p, d);
+    const double h = 1e-7;
+    for (int j = 0; j < 2; j++) {
+        Eigen::Vector2d e = Eigen::Vector2d::Zero();
+        e(j) = h;
+        const Eigen::Vector4d fd =
+            (BSIM::tvc_kinematics(p, d + e).l - BSIM::tvc_kinematics(p, d - e).l) / (2 * h);
+        CHECK_NEAR((fd - k.J.col(j)).norm(), 0.0, 1e-8);
+    }
+}
+
+// section 10: four lengths back to two angles, a few gauss newton steps
+static void test_tvc_forward_kinematics() {
+    const BSIM::TvcParams p = tvc_example();
+    const Eigen::Vector2d d(9 * R_DEG, 7 * R_DEG);
+    double res = 1.0;
+    const Eigen::Vector2d back = BSIM::tvc_forward_kinematics(
+        p, BSIM::tvc_kinematics(p, d).l, Eigen::Vector2d::Zero(), 4, &res);
+    CHECK_NEAR((back - d).norm(), 0.0, 1e-10);
+    CHECK_NEAR(res, 0.0, 1e-12);
+}
+
+// section 08 figure 11: an 8 deg step slews at the valves' flow limit, v0 / arm = 91 deg/s, and lands
+// on it. against 150 N m it slows to about 60 deg/s and settles short (load droop, 7.7 deg)
+static void test_tvc_step_slew_and_droop() {
+    const BSIM::TvcParams p = tvc_example();
+    auto slew = [](const std::vector<double> &dp, double dt) {
+        double fastest = 0.0;
+        for (size_t i = 1; i < dp.size(); i++) {
+            fastest = std::max(fastest, (dp[i] - dp[i - 1]) / dt);
+        }
+        return fastest / R_DEG;
+    };
+    BSIM::TvcInputs in;
+    in.delta_cmd << 8 * R_DEG, 0.0;
+
+    BSIM::TvcState s = BSIM::tvc_rest();
+    const std::vector<double> light = tvc_run(p, s, in, 0.4);
+    CHECK_NEAR(slew(light, 1e-3), 91.0, 6.0);
+    CHECK_NEAR(light.back() / R_DEG, 8.0, 0.05);
+
+    in.load << -150.0, 0.0;
+    s = BSIM::tvc_rest();
+    const std::vector<double> loaded = tvc_run(p, s, in, 0.6);
+    CHECK_NEAR(slew(loaded, 1e-3), 60.0, 8.0);
+    CHECK(loaded.back() / R_DEG < 7.95 && loaded.back() / R_DEG > 7.4);
+}
+
+// figure 12: kick the held nozzle, it rings at the oil spring's frequency, about 92 Hz
+static void test_tvc_oil_spring_rings_near_92_hz() {
+    const BSIM::TvcParams p = tvc_example();
+    BSIM::TvcState s = BSIM::tvc_rest();
+    BSIM::TvcInputs in;
+    in.load << 200.0, 0.0;
+    s = BSIM::tvc_step(p, s, in, 0.5e-3);
+    in.load.setZero();
+    // the rate swings back and forth at the ringing frequency, time two successive reversals
+    const double dt = 2e-5;
+    std::vector<double> rate;
+    for (int i = 0; i < 1500; i++) {
+        s = BSIM::tvc_step(p, s, in, dt);
+        rate.push_back(s(2));
+    }
+    std::vector<double> flips;
+    for (size_t i = 1; i < rate.size() && flips.size() < 3; i++) {
+        if ((rate[i - 1] < 0.0) != (rate[i] < 0.0)) {
+            flips.push_back(i * dt);
+        }
+    }
+    CHECK(flips.size() >= 3);
+    if (flips.size() >= 3) {
+        CHECK_NEAR(1.0 / (flips[2] - flips[0]), 92.0, 12.0); // a full period is two reversals
+    }
 }
 
 static void test_rocket_jet_damping_and_J_dot() {
@@ -1924,6 +2184,16 @@ int main() {
     test_rocket_thrust_with_altitude_and_curve();
     test_rocket_tsiolkovsky();
     test_rocket_tvc_moment_signs();
+    test_rocket_gimbal_massless_or_still_adds_nothing();
+    test_rocket_gimbal_tail_wags_dog();
+    test_rocket_gimbal_coriolis_coupling();
+    test_rocket_gimbal_conserves_angular_momentum();
+    test_rocket_hinge_torque();
+    test_tvc_kinematics_match_notes();
+    test_tvc_jacobian_matches_finite_difference();
+    test_tvc_forward_kinematics();
+    test_tvc_step_slew_and_droop();
+    test_tvc_oil_spring_rings_near_92_hz();
     test_rocket_jet_damping_and_J_dot();
     test_rocket_crossflow_damping_matches_openrocket();
     test_rocket_crossflow_without_rotation_is_body_lift();

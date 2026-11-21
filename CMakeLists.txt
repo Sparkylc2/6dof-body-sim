@@ -60,6 +60,7 @@ add_library(bsim_models STATIC
   src/force_models/fixed_wing_model.cpp
   src/force_models/spacecraft_model.cpp
   src/force_models/rocket_model.cpp
+  src/force_models/tvc_model.cpp
   src/dynamics.cpp
   src/craft.cpp
   src/actuators.cpp

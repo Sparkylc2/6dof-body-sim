@@ -10,6 +10,7 @@
 #include "force_models/fixed_wing_model.hpp"
 #include "force_models/rocket_model.hpp"
 #include "force_models/spacecraft_model.hpp"
+#include "force_models/tvc_model.hpp"
 #include "sensors.hpp"
 
 // --- craft ---
@@ -132,13 +133,21 @@ struct Rocket {
     // where the actuators have actually got to, see controls())
     RocketControls commands;
 
-    Actuator gimbal_p, gimbal_y; // pitch and yaw gimbal servos
-    std::vector<Actuator> fins;  // one servo per grid fin
+    // the hydraulic TVC that swings the engine (force_models/tvc_model.hpp), its 12 states, and
+    // what it last got from the vehicle (the load on the nozzle and the thrust, a step late is fine)
+    TvcParams tvc;
+    TvcState tvc_state = tvc_rest();
+    Eigen::Vector2d tvc_load = Eigen::Vector2d::Zero();
+    double tvc_thrust = 0.0;
+    Eigen::Vector2d tvc_accel = Eigen::Vector2d::Zero(); // the nozzle's average accel last step
+
+    std::vector<Actuator> fins; // one servo per grid fin
 
     State state; // [p | v | q | w | m], p and v are the cm's, NED
 
-    // moves the gimbal and fins towards their commands over dt (call before the physics step)
-    // (the fin servos are held at 0 while the fins are stowed)
+    // moves the gimbal (the hydraulic TVC, sub stepped inside) and fins towards their commands
+    // over dt (call before the physics step). the fin servos are held at 0 while the fins are
+    // stowed. set tvc_load and tvc_thrust from the last step's RocketTerms (nozzle_load, engine.T)
     void step_actuators(double dt);
 
     // the commands with the actuator positions swapped in (what goes into rocket_derivatives)
